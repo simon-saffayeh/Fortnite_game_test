@@ -5,39 +5,78 @@ import * as THREE from 'three';
 export const WEAPON_DEFS = {
   pistol: {
     id: 'pistol', name: 'Pistol',
-    damage: 25, fireRate: 0.45, bulletSpeed: 130, range: 180,
+    damage: 25, fireRate: 0.45, bulletSpeed: 260, range: 180,
     spread: 0.024, magSize: 12, reloadTime: 1.3,
-    rarityColor: 0xaaaaaa, rarity: 'Common', auto: false, pellets: 1,
+    rarityColor: 0x888888, rarity: 'Common', auto: false, pellets: 1,
   },
   smg: {
     id: 'smg', name: 'SMG',
-    damage: 16, fireRate: 0.07, bulletSpeed: 175, range: 130,
+    damage: 16, fireRate: 0.07, bulletSpeed: 350, range: 130,
     spread: 0.058, magSize: 30, reloadTime: 1.6,
-    rarityColor: 0x00cc55, rarity: 'Uncommon', auto: true, pellets: 1,
+    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: true, pellets: 1,
   },
   ar: {
     id: 'ar', name: 'Assault Rifle',
-    damage: 30, fireRate: 0.11, bulletSpeed: 210, range: 300,
+    damage: 30, fireRate: 0.11, bulletSpeed: 420, range: 300,
     spread: 0.026, magSize: 30, reloadTime: 2.0,
-    rarityColor: 0x0099ff, rarity: 'Rare', auto: true, pellets: 1,
+    rarityColor: 0x0088ff, rarity: 'Rare', auto: true, pellets: 1,
   },
   shotgun: {
     id: 'shotgun', name: 'Shotgun',
-    damage: 24, fireRate: 0.85, bulletSpeed: 75, range: 55,
+    damage: 24, fireRate: 0.85, bulletSpeed: 150, range: 55,
     spread: 0.13, magSize: 8, reloadTime: 2.5,
-    rarityColor: 0xcc44ff, rarity: 'Epic', auto: false, pellets: 7,
+    rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 7,
   },
   sniper: {
     id: 'sniper', name: 'Sniper Rifle',
-    damage: 150, fireRate: 1.6, bulletSpeed: 520, range: 950,
+    damage: 150, fireRate: 1.6, bulletSpeed: 600, range: 950,
     spread: 0.003, magSize: 5, reloadTime: 3.2,
     rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
   },
   minigun: {
     id: 'minigun', name: 'Minigun',
-    damage: 20, fireRate: 0.055, bulletSpeed: 195, range: 260,
+    damage: 20, fireRate: 0.055, bulletSpeed: 390, range: 260,
     spread: 0.058, magSize: 100, reloadTime: 5.0,
-    rarityColor: 0xff4400, rarity: 'Mythic', auto: true, pellets: 1,
+    rarityColor: 0xff1111, rarity: 'Mythic', auto: true, pellets: 1,
+  },
+  revolver: {
+    id: 'revolver', name: 'Revolver',
+    damage: 55, fireRate: 0.55, bulletSpeed: 280, range: 200,
+    spread: 0.012, magSize: 6, reloadTime: 1.8,
+    rarityColor: 0x888888, rarity: 'Common', auto: false, pellets: 1,
+  },
+  burstRifle: {
+    id: 'burstRifle', name: 'Burst Rifle',
+    damage: 28, fireRate: 0.10, bulletSpeed: 440, range: 280,
+    spread: 0.020, magSize: 30, reloadTime: 2.1,
+    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
+    burstCount: 3, burstDelay: 0.08,
+  },
+  heavyAR: {
+    id: 'heavyAR', name: 'Heavy AR',
+    damage: 42, fireRate: 0.18, bulletSpeed: 400, range: 320,
+    spread: 0.018, magSize: 20, reloadTime: 2.4,
+    rarityColor: 0x0088ff, rarity: 'Rare', auto: true, pellets: 1,
+  },
+  dualPistols: {
+    id: 'dualPistols', name: 'Dual Pistols',
+    damage: 30, fireRate: 0.22, bulletSpeed: 270, range: 160,
+    spread: 0.030, magSize: 18, reloadTime: 1.5,
+    rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 2,
+  },
+  rocketLauncher: {
+    id: 'rocketLauncher', name: 'Rocket Launcher',
+    damage: 120, fireRate: 1.8, bulletSpeed: 80, range: 400,
+    spread: 0.005, magSize: 4, reloadTime: 3.5,
+    rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
+    explosive: true, explosionRadius: 8, explosionDamage: 120,
+  },
+  bombLauncher: {
+    id: 'bombLauncher', name: 'Bomb Launcher',
+    damage: 200, fireRate: 1.2, bulletSpeed: 60, range: 350,
+    spread: 0.008, magSize: 6, reloadTime: 4.0,
+    rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 1,
+    explosive: true, explosionRadius: 18, explosionDamage: 200,
   },
 };
 
@@ -126,6 +165,58 @@ export function buildGunModel(def, scale = 1) {
     // Pistol grip + trigger guard
     g.add(box(0.10, 0.26, 0.13, 0x1a1410, 0, -0.20, 0.24));
     g.add(box(0.04, 0.08, 0.16, 0x111111, 0, -0.10, 0.12));
+
+  } else if (def.id === 'revolver') {
+    g.add(box(0.11, 0.17, 0.55, 0x3a3a3a, 0, 0, 0));
+    g.add(box(0.06, 0.06, 0.35, 0x111111, 0, 0.06, -0.38));
+    g.add(cyl(0.07, 0.12, 0x555555, 0, 0, -0.05, Math.PI/2)); // cylinder
+    g.add(box(0.10, 0.22, 0.14, 0x2a2a2a, 0, -0.16, 0.16));
+    g.add(box(0.04, 0.08, 0.13, 0x111111, 0, -0.08, 0.06));
+
+  } else if (def.id === 'burstRifle') {
+    g.add(box(0.10, 0.15, 0.82, 0x3a4a2a, 0, 0, 0));
+    g.add(box(0.04, 0.04, 0.30, 0x111111, 0, 0.04, -0.55));
+    g.add(box(0.08, 0.10, 0.25, 0x2a3a1a, 0, -0.02, 0.50));
+    g.add(box(0.07, 0.22, 0.11, def.rarityColor, 0, -0.17, 0.10));
+    g.add(box(0.08, 0.17, 0.11, 0x222222, 0, -0.15, 0.28));
+    g.add(box(0.04, 0.03, 0.48, 0x444444, 0, 0.10, 0.02));
+
+  } else if (def.id === 'heavyAR') {
+    g.add(box(0.13, 0.19, 1.05, 0x1a2a1a, 0, 0, 0));
+    g.add(box(0.06, 0.06, 0.42, 0x111111, 0, 0.05, -0.72));
+    g.add(box(0.10, 0.13, 0.34, 0x2a3a2a, 0, -0.03, 0.65));
+    g.add(box(0.09, 0.28, 0.13, def.rarityColor, 0, -0.20, 0.10));
+    g.add(box(0.10, 0.20, 0.13, 0x222222, 0, -0.16, 0.34));
+    g.add(box(0.06, 0.04, 0.60, 0x445544, 0, 0.12, 0.02));
+    g.add(cyl(0.040, 0.36, 0x222222, 0, 0.14, -0.10, Math.PI/2));
+
+  } else if (def.id === 'dualPistols') {
+    // Two pistol barrels side by side
+    g.add(box(0.22, 0.17, 0.58, 0x4a3355, 0, 0, 0));
+    g.add(box(0.05, 0.05, 0.36, 0x111111, -0.06, 0.06, -0.42));
+    g.add(box(0.05, 0.05, 0.36, 0x111111,  0.06, 0.06, -0.42));
+    g.add(box(0.08, 0.22, 0.14, def.rarityColor, 0, -0.17, 0.12));
+    g.add(box(0.09, 0.20, 0.13, 0x222222, 0, -0.15, 0.28));
+
+  } else if (def.id === 'rocketLauncher') {
+    g.add(cyl(0.11, 0.90, 0x3a3a2a, 0, 0, 0, Math.PI/2)); // tube
+    g.add(cyl(0.115,0.10, def.rarityColor, 0, 0, -0.46, Math.PI/2)); // front ring
+    g.add(cyl(0.08, 0.08, 0x222222, 0, 0, -0.50, Math.PI/2)); // muzzle
+    g.add(box(0.10, 0.25, 0.14, 0x2a2a1a, 0, -0.20, 0.22)); // grip
+    g.add(box(0.04, 0.09, 0.16, 0x111111, 0, -0.09, 0.10)); // trigger
+    g.add(box(0.09, 0.12, 0.18, 0x444433, 0, 0.14, 0.32)); // sight
+
+  } else if (def.id === 'bombLauncher') {
+    g.add(cyl(0.14, 0.75, 0x1a0000, 0, 0, 0, Math.PI/2)); // fat tube
+    g.add(cyl(0.145,0.12, def.rarityColor, 0, 0, -0.38, Math.PI/2)); // front ring glowing
+    g.add(cyl(0.10, 0.10, 0x330000, 0, 0, -0.44, Math.PI/2)); // muzzle
+    g.add(cyl(0.14, 0.12, def.rarityColor, 0, 0, 0.30, Math.PI/2)); // back ring
+    g.add(box(0.11, 0.28, 0.15, 0x1a0000, 0, -0.22, 0.20)); // grip
+    g.add(box(0.04, 0.10, 0.17, 0x220000, 0, -0.10, 0.08)); // trigger
+    // Glowing emissive dome on top
+    const domeMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), domeMat);
+    dome.position.set(0, 0.16, 0.05); g.add(dome);
   }
 
   g.scale.setScalar(scale);
@@ -229,40 +320,94 @@ export class WeaponPickup {
   }
 }
 
+// ── Rarity spawn table ───────────────────────────────────────────────────────
+// Rarity weights: higher index = rarer. Weights must sum to 100.
+export const RARITY_POOL = [
+  { id: 'pistol',        weight: 20 },
+  { id: 'revolver',      weight: 15 },
+  { id: 'smg',           weight: 14 },
+  { id: 'burstRifle',    weight: 11 },
+  { id: 'ar',            weight: 12 },
+  { id: 'heavyAR',       weight: 8  },
+  { id: 'shotgun',       weight: 7  },
+  { id: 'dualPistols',   weight: 5  },
+  { id: 'sniper',        weight: 4  },
+  { id: 'rocketLauncher',weight: 3  },
+  { id: 'minigun',       weight: 1  },
+  { id: 'bombLauncher',  weight: 0.5},
+];
+
+export function randomWeaponDef() {
+  const total = RARITY_POOL.reduce((s, e) => s + e.weight, 0);
+  let r = Math.random() * total;
+  for (const entry of RARITY_POOL) {
+    r -= entry.weight;
+    if (r <= 0) return WEAPON_DEFS[entry.id];
+  }
+  return WEAPON_DEFS.pistol;
+}
+
 // ── WeaponSystem (spawns and manages all pickups) ────────────────────────────
-// More common weapons have more spawns; Mythic has just two.
-const SPAWN_LIST = [
-  // Common — Pistol (5 spawns, spread around map)
-  { id: 'pistol',  x:  58, z:  -2 },
-  { id: 'pistol',  x:  70, z:   5 },
-  { id: 'pistol',  x:  32, z:  72 },
-  { id: 'pistol',  x: -22, z: -32 },
-  { id: 'pistol',  x: -60, z:  20 },
+const SPAWN_POINTS = [
+  // Spread around map
+  { x:  58, z:  -2 },
+  { x:  70, z:   5 },
+  { x:  32, z:  72 },
+  { x: -22, z: -32 },
+  { x: -60, z:  20 },
+  { x:  42, z: -38 },
+  { x: -35, z:  55 },
+  { x:  18, z:  90 },
+  { x: -80, z: -18 },
+  { x: -78, z:  27 },
+  { x: -90, z:  33 },
+  { x:   0, z:  28 },
+  { x:  45, z:  45 },
+  { x:  14, z:-100 },
+  { x:  27, z: -96 },
+  { x: -42, z:  78 },
+  { x: -26, z:  50 },
+  { x:  52, z: -88 },
+  { x: -95, z: -72 },
+  { x:  88, z:  80 },
 
-  // Uncommon — SMG (4 spawns)
-  { id: 'smg',     x:  42, z: -38 },
-  { id: 'smg',     x: -35, z:  55 },
-  { id: 'smg',     x:  18, z:  90 },
-  { id: 'smg',     x: -80, z: -18 },
+  // ── POI indoor loot ──────────────────────────────────────────────────
+  // Cedar Creek (center 100, 0)
+  { x: 100,  z:  0   },
+  { x: 103,  z: -2   },
+  { x:  97,  z:  2   },
+  { x: 114,  z: -14  },  // guest cabin
+  { x:  86,  z:  4   },  // shed
 
-  // Rare — Assault Rifle (4 spawns)
-  { id: 'ar',      x: -78, z:  27 },
-  { id: 'ar',      x: -90, z:  33 },
-  { id: 'ar',      x:   0, z:  28 },
-  { id: 'ar',      x:  45, z:  45 },
+  // Fort Ironwatch (center -130, 50)
+  { x: -130, z:  63  },  // barracks
+  { x: -130, z:  32  },  // armory
+  { x: -130, z:  50  },  // keep interior
 
-  // Epic — Shotgun (3 spawns)
-  { id: 'shotgun', x:  14, z:-100 },
-  { id: 'shotgun', x:  27, z: -96 },
-  { id: 'shotgun', x: -42, z:  78 },
+  // Ancient Temple (center 35, -160)
+  { x:  35,  z: -160 },
+  { x:  32,  z: -162 },
 
-  // Legendary — Sniper (2 spawns, far out)
-  { id: 'sniper',  x: -26, z:  50 },
-  { id: 'sniper',  x:  52, z: -88 },
+  // Military Compound (center -50, 80)
+  { x: -50,  z:  80  },  // main bunker
+  { x: -68,  z:  72  },  // secondary bunker
+  { x: -50,  z:  80  },  // rare chest
 
-  // Mythic — Minigun (2 spawns, deep map)
-  { id: 'minigun', x: -95, z: -72 },
-  { id: 'minigun', x:  88, z:  80 },
+  // Olsen's Farm (center 150, -75)
+  { x: 150,  z: -75  },  // farmhouse
+  { x: 170,  z: -77  },  // barn 1
+  { x: 133,  z: -75  },  // barn 2
+  { x: 152,  z: -77  },
+
+  // Whalen's Town (center -125, -120)
+  { x: -125, z: -142 },  // church
+  { x: -125, z:  -98 },  // town hall
+  { x: -103, z: -120 },  // tavern
+  { x: -147, z: -120 },  // blacksmith
+  { x: -145, z: -128 },  // house
+  { x: -133, z: -128 },  // house
+  { x: -117, z: -128 },  // house
+  { x: -105, z: -128 },  // house
 ];
 
 export class WeaponSystem {
@@ -275,10 +420,10 @@ export class WeaponSystem {
   }
 
   _spawnAll() {
-    for (const s of SPAWN_LIST) {
+    for (const s of SPAWN_POINTS) {
       const h = this.world.getTerrainHeight(s.x, s.z);
       if (h < 0.2) continue;
-      const def = WEAPON_DEFS[s.id];
+      const def = randomWeaponDef();
       this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, h, s.z)));
     }
   }

@@ -30,7 +30,12 @@ export class Inventory {
 
   selectSlot(idx) {
     this.activeSlot = idx;
-    this.player.setHeldWeapon(this.slots[idx]?.def ?? null);
+    const s = this.slots[idx];
+    if (!s || s.isConsumable) {
+      this.player.setHeldWeapon(null);
+    } else {
+      this.player.setHeldWeapon(s.def);
+    }
   }
 
   getActive() { return this.slots[this.activeSlot] ?? null; }
@@ -62,6 +67,46 @@ export class Inventory {
     return true;
   }
 
+  /** Add a consumable to inventory. Returns true. */
+  addConsumable(def) {
+    // Stack: if same consumable already in a slot, increment count
+    for (let i = 0; i < 5; i++) {
+      const s = this.slots[i];
+      if (s?.isConsumable && s.def.id === def.id) {
+        s.count = (s.count || 1) + 1;
+        this.selectSlot(i);
+        return true;
+      }
+    }
+    // Empty slot
+    for (let i = 0; i < 5; i++) {
+      if (!this.slots[i]) {
+        this.slots[i] = { isConsumable: true, def, count: 1 };
+        this.selectSlot(i);
+        return true;
+      }
+    }
+    // Replace active
+    this.slots[this.activeSlot] = { isConsumable: true, def, count: 1 };
+    this.selectSlot(this.activeSlot);
+    return true;
+  }
+
+  /** Use the active consumable if it is one. Returns true if used. */
+  useActive(player) {
+    const s = this.slots[this.activeSlot];
+    if (!s?.isConsumable) return false;
+    const def = s.def;
+    if (def.healHp    > 0) player.health = Math.min(player.maxHealth, player.health + def.healHp);
+    if (def.healShield > 0) player.healShield(def.healShield);
+    s.count--;
+    if (s.count <= 0) {
+      this.slots[this.activeSlot] = null;
+      this.player.setHeldWeapon(null);
+    }
+    return true;
+  }
+
   dropActive() {
     this.slots[this.activeSlot] = null;
     this.player.setHeldWeapon(null);
@@ -72,6 +117,6 @@ export class Inventory {
   }
 
   update(dt) {
-    for (const s of this.slots) s?.update(dt);
+    for (const s of this.slots) if (s && !s.isConsumable) s.update(dt);
   }
 }

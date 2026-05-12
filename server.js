@@ -15,6 +15,7 @@ const MIME = {
   '.css': 'text/css',   '.png': 'image/png',
   '.jpg': 'image/jpeg', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
 };
 
 // ── Lobby state ───────────────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ let nextId      = 1;
 // ── HTTP static file server ───────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   let url = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+  try { url = decodeURIComponent(url); } catch {}
   const filePath   = path.join(ROOT, url);
   const ext        = path.extname(filePath);
   fs.readFile(filePath, (err, data) => {

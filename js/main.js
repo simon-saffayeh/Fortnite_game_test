@@ -12,6 +12,10 @@ import { Storm }             from './storm.js';
 import { PickupManager }     from './pickups.js';
 import { ScreenShake, MuzzleFlash, DamageNumbers, DirectionalDamage, HitMarker } from './effects.js';
 import { NetworkManager, MP_SPAWNS } from './multiplayer.js';
+import { BuildingSystem } from './building.js';
+import { ZombieWaveManager } from './zombie.js';
+
+const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
 // ── Menu / Lobby controller ───────────────────────────────────────────────────
 class Menu {
@@ -21,10 +25,22 @@ class Menu {
     this._myName = localStorage.getItem('bi_name') || `Player${Math.floor(Math.random() * 90) + 10}`;
 
     document.getElementById('btn-solo').addEventListener('click', () => this._startSolo());
+    document.getElementById('btn-zombie').addEventListener('click', () => this._startZombie());
     document.getElementById('btn-multiplayer').addEventListener('click', () => this._openLobby());
     document.getElementById('btn-ready').addEventListener('click', () => this._toggleReady());
     document.getElementById('btn-start-game').addEventListener('click', () => this._requestStart());
     document.getElementById('btn-lobby-back').addEventListener('click', () => location.reload());
+
+    // Sensitivity slider
+    const sensSlider = document.getElementById('sens-slider');
+    const sensValue  = document.getElementById('sens-value');
+    const saved = JSON.parse(localStorage.getItem('bi_settings') || '{}');
+    if (saved.sensitivity) sensSlider.value = saved.sensitivity;
+    sensValue.textContent = parseFloat(sensSlider.value).toFixed(1);
+    sensSlider.addEventListener('input', () => {
+      sensValue.textContent = parseFloat(sensSlider.value).toFixed(1);
+      localStorage.setItem('bi_settings', JSON.stringify({ sensitivity: parseFloat(sensSlider.value) }));
+    });
 
     const nameInput = document.getElementById('player-name');
     nameInput.value = this._myName;
@@ -40,14 +56,30 @@ class Menu {
     });
   }
 
+  _buildEnabled() {
+    return document.getElementById('build-toggle')?.checked ?? true;
+  }
+
   _startSolo() {
     const hs = document.getElementById('home-screen');
+    const buildEnabled = this._buildEnabled();
     hs.classList.add('fade-out');
     setTimeout(() => {
       hs.style.display = 'none';
       document.getElementById('loading-screen').classList.remove('hidden');
     }, 380);
-    setTimeout(() => new Game('solo', null), 420);
+    setTimeout(() => new Game('solo', null, buildEnabled), 420);
+  }
+
+  _startZombie() {
+    const hs = document.getElementById('home-screen');
+    const buildEnabled = this._buildEnabled();
+    hs.classList.add('fade-out');
+    setTimeout(() => {
+      hs.style.display = 'none';
+      document.getElementById('loading-screen').classList.remove('hidden');
+    }, 380);
+    setTimeout(() => new Game('zombie', null, buildEnabled), 420);
   }
 
   async _openLobby() {
@@ -94,9 +126,10 @@ class Menu {
     };
 
     this._net.onGameStart = () => {
+      const buildEnabled = this._buildEnabled();
       document.getElementById('lobby-screen').classList.add('hidden');
       document.getElementById('loading-screen').classList.remove('hidden');
-      setTimeout(() => new Game('multi', this._net), 120);
+      setTimeout(() => new Game('multi', this._net, buildEnabled), 120);
     };
 
     document.getElementById('lobby-screen').classList.remove('hidden');
@@ -148,9 +181,10 @@ class Menu {
 
 // ── Game ──────────────────────────────────────────────────────────────────────
 class Game {
-  constructor(mode = 'solo', net = null) {
-    this.mode   = mode;
-    this.net    = net;
+  constructor(mode = 'solo', net = null, buildEnabled = true) {
+    this.mode         = mode;
+    this.net          = net;
+    this.buildEnabled = buildEnabled;
     this.canvas = document.getElementById('game-canvas');
     this.clock  = new THREE.Clock();
     this.running = false;
@@ -165,11 +199,17 @@ class Game {
   }
 
   async _init() {
-    this._setupRenderer();
-    this._setupScene();
-    await this._loadWorld();
-    this._setupEvents();
-    this._startLoop();
+    try {
+      this._setupRenderer();
+      this._setupScene();
+      await this._loadWorld();
+      this._setupEvents();
+      this._startLoop();
+    } catch (err) {
+      console.error('Game init failed:', err);
+      const txt = document.getElementById('loading-text');
+      if (txt) txt.textContent = 'Error: ' + err.message;
+    }
   }
 
   _setupRenderer() {
@@ -185,7 +225,7 @@ class Game {
 
   _setupScene() {
     this.scene  = new THREE.Scene();
-    this.scene.fog = new THREE.FogExp2(0x87ceeb, 0.0045);
+    this.scene.fog = new THREE.FogExp2(0x9ec8e8, 0.0038);
     this.camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 2000);
   }
 
@@ -207,10 +247,11 @@ class Game {
     // ── Core world ───────────────────────────────────────────────────────
     this.world  = new World(this.scene);
     this.world.generate();
+    await this.world.loadFurniture();
 
     // ── Spawn position ───────────────────────────────────────────────────
     let spawnPos;
-    if (this.mode === 'solo') {
+    if (this.mode === 'solo' || this.mode === 'zombie') {
       spawnPos = this.world.getSpawnPosition();
     } else {
       const idx = (parseInt(this.net.myId) - 1) % MP_SPAWNS.length;
@@ -220,6 +261,8 @@ class Game {
     }
 
     this.player    = new Player(this.scene, spawnPos, this.world);
+    const biSettings = JSON.parse(localStorage.getItem('bi_settings') || '{}');
+    if (biSettings.sensitivity) this.player._sensMultiplier = biSettings.sensitivity;
     this.camera3P  = new ThirdPersonCamera(this.camera, this.player);
     this.particles = new ParticleSystem(this.scene);
 
@@ -227,10 +270,14 @@ class Game {
     this.projectiles = new ProjectileSystem(this.scene, this.world);
 
     if (this.mode === 'solo') {
-      this.enemies = new EnemyManager(this.scene, this.world, this.projectiles);
+      this.enemies    = new EnemyManager(this.scene, this.world, this.projectiles);
+      this.zombieWaves = null;
+    } else if (this.mode === 'zombie') {
+      this.enemies    = null;
+      this.zombieWaves = new ZombieWaveManager(this.scene, this.world, this.projectiles);
     } else {
-      this.enemies = null;
-      // Build spawn point vectors for remote players
+      this.enemies    = null;
+      this.zombieWaves = null;
       const mpSpawnVecs = MP_SPAWNS.map(([x, z]) => {
         const h = this.world.getTerrainHeight(x, z);
         return new THREE.Vector3(x, h + 1.5, z);
@@ -241,7 +288,7 @@ class Game {
     this.weapons   = new WeaponSystem(this.scene, this.world);
     this.inventory = new Inventory(this.player);
     this.pickups   = new PickupManager(this.scene, this.world);
-    this.storm     = new Storm(this.scene);
+    this.storm     = this.mode === 'zombie' ? null : new Storm(this.scene);
 
     // ── Effects ───────────────────────────────────────────────────────
     this.shake   = new ScreenShake();
@@ -249,6 +296,43 @@ class Game {
     this.dmgNums = new DamageNumbers();
     this.dirDmg  = new DirectionalDamage();
     this.hitMark = new HitMarker();
+
+    // ── Building ──────────────────────────────────────────────────────
+    if (this.buildEnabled) {
+      this.building = new BuildingSystem(this.scene, this.world);
+      if (this.net) {
+        this.building.onPlace = (type, x, y, z, rotY) => this.net.sendBuild(type, x, y, z, rotY);
+        this.net.onRemoteBuild = msg => this.building.placeRemote(msg.pieceType, msg.x, msg.y, msg.z, msg.rotY);
+      }
+    } else {
+      this.building = null;
+    }
+    this.projectiles.buildingSystem = this.building;
+
+    // ── Composite collision provider (build pieces + static world) ────
+    const building = this.building;
+    const staticC  = this.world.staticCollider;
+    this.player.collisionProvider = {
+      getWallPush(wx, wy, wz, r) {
+        const p1 = building?.getWallPush(wx, wy, wz, r);
+        const p2 = staticC.getWallPush(wx, wy, wz, r);
+        if (!p1 && !p2) return null;
+        return { x: (p1?.x ?? 0) + (p2?.x ?? 0), z: (p1?.z ?? 0) + (p2?.z ?? 0) };
+      },
+      getHeightAt(wx, wz, py) {
+        const h1 = building?.getHeightAt(wx, wz, py) ?? null;
+        const h2 = staticC.getHeightAt(wx, wz, py);
+        if (h1 === null && h2 === null) return null;
+        if (h1 === null) return h2;
+        if (h2 === null) return h1;
+        return Math.max(h1, h2);
+      },
+    };
+
+    // ── Map ───────────────────────────────────────────────────────────
+    this._mapOverlay  = document.getElementById('map-overlay');
+    this._mapTerrain  = this.world.renderMapCanvas();
+    this._mapOpen     = false;
 
     // ── HUD ───────────────────────────────────────────────────────────
     this.hud = new HUD(this.player, this.world, this.enemies, this.inventory, this.storm);
@@ -284,6 +368,33 @@ class Game {
           this._victoryShown = true;
           setTimeout(() => this._showVictory(), 1200);
         }
+      };
+    } else if (this.mode === 'zombie') {
+      this._buildZombieHUD();
+      this.hud.setEnemiesRemaining(0, 0);
+      document.querySelector('.er-label').textContent = 'ZOMBIES';
+
+      this.zombieWaves.onKill = (e) => {
+        this._killCount++;
+        this.hud.addKill('Zombie');
+        if (Math.random() < 0.5) this.pickups.spawnLoot(e.root.position);
+        const alive = this.zombieWaves.aliveCount;
+        this.hud.setEnemiesRemaining(alive, waveCount_hud(this.zombieWaves.wave));
+      };
+      this.zombieWaves.onWaveStart = (w) => {
+        this._showWaveBanner(`WAVE ${w} / ${this.zombieWaves.totalWaves}`, '#ef4444');
+        const total = waveCount_hud(w);
+        this.hud.setEnemiesRemaining(total, total);
+      };
+      this.zombieWaves.onWaveEnd = (_w) => {
+        this._showWaveBanner('WAVE CLEAR!', '#22c55e');
+      };
+      this.zombieWaves.onAllWavesComplete = () => {
+        this._victoryShown = true;
+        setTimeout(() => this._showVictory(), 1200);
+      };
+      this.zombieWaves.onIntermissionTick = (secs, next) => {
+        this._updateZombieHUD(secs, next);
       };
     } else {
       // Multiplayer enemy-remaining → players remaining
@@ -359,6 +470,22 @@ class Game {
 
     window.addEventListener('keydown', e => {
       if (!this.running) return;
+
+      // Map
+      if (e.code === 'KeyM') { this._toggleMap(); return; }
+
+      // Build mode toggle
+      if (this.building && e.code === 'KeyB') { this.building.toggle(); this._updateBuildHUD(); return; }
+
+      // Build mode controls
+      if (this.building?.active) {
+        if (e.code === 'KeyZ') { this.building.setType('wall');  this._updateBuildHUD(); return; }
+        if (e.code === 'KeyX') { this.building.setType('floor'); this._updateBuildHUD(); return; }
+        if (e.code === 'KeyC') { this.building.setType('ramp');  this._updateBuildHUD(); return; }
+        if (e.code === 'KeyR') { this.building.rotate(); return; }
+        if (e.code === 'Escape') { this.building.toggle(); this._updateBuildHUD(); return; }
+      }
+
       if (e.code === 'KeyE') {
         const wp = this.weapons.getNearbyPickup();
         if (wp) {
@@ -366,10 +493,19 @@ class Game {
           wp.collect();
           return;
         }
-        const def = this.pickups.tryCollect(this.player);
-        if (def) this.hud.showPickupMessage(def.label, def.healHp > 0 ? 0x00ee66 : 0x44aaff);
+        const def = this.pickups.tryCollect();
+        if (def) {
+          this.inventory.addConsumable(def);
+          this.hud.showPickupMessage(def.label, def.healHp > 0 ? 0x00ee66 : 0x44aaff);
+        }
+      }
+
+      if (e.code === 'KeyF') {
+        this.inventory.useActive(this.player);
       }
     });
+
+    if (this.building) this._buildBuildHUD();
 
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -382,6 +518,15 @@ class Game {
   _tryShoot() {
     if (!document.pointerLockElement) {
       this._prevMouseDown = this.player.mouseDown;
+      return;
+    }
+
+    // In build mode: left-click places, no shooting
+    if (this.building?.active) {
+      const now  = this.player.mouseDown;
+      const prev = this._prevMouseDown;
+      if (now && !prev) this.building.tryPlace(this.camera);
+      this._prevMouseDown = now;
       return;
     }
     const weapon = this.inventory?.getActive();
@@ -407,7 +552,7 @@ class Game {
       )).normalize();
       this.projectiles.spawn(origin.clone(), dir, {
         speed: weapon.def.bulletSpeed, damage: weapon.def.damage,
-        faction: 'player', range: weapon.def.range,
+        faction: 'player', range: weapon.def.range, def: weapon.def,
       });
     }
 
@@ -461,6 +606,116 @@ class Game {
     document.body.appendChild(el);
   }
 
+  // ── Zombie HUD ────────────────────────────────────────────────────────────
+  _buildZombieHUD() {
+    this._zombieEl = document.createElement('div');
+    this._zombieEl.id = 'zombie-hud';
+    this._zombieEl.innerHTML = `<span id="z-label">NEXT WAVE IN</span> <span id="z-timer">5</span>s`;
+    document.getElementById('hud').appendChild(this._zombieEl);
+  }
+
+  _updateZombieHUD(secs, nextWave) {
+    if (!this._zombieEl) return;
+    const label = document.getElementById('z-label');
+    const timer = document.getElementById('z-timer');
+    if (label) label.textContent = `WAVE ${nextWave} IN`;
+    if (timer) timer.textContent = secs;
+  }
+
+  _showWaveBanner(text, color = '#fff') {
+    let el = document.getElementById('wave-banner');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'wave-banner';
+      document.getElementById('hud').appendChild(el);
+    }
+    el.textContent = text;
+    el.style.color = color;
+    el.style.opacity = '1';
+    clearTimeout(this._waveBannerTimer);
+    this._waveBannerTimer = setTimeout(() => { el.style.opacity = '0'; }, 2800);
+  }
+
+  // ── Map ───────────────────────────────────────────────────────────────────
+  _toggleMap() {
+    this._mapOpen = !this._mapOpen;
+    this._mapOverlay.classList.toggle('hidden', !this._mapOpen);
+    if (this._mapOpen) {
+      document.exitPointerLock();
+      this._drawMap();
+    } else {
+      this.canvas.requestPointerLock();
+    }
+  }
+
+  _drawMap() {
+    const canvas = document.getElementById('map-canvas');
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const S = this.world.size;
+
+    // Terrain base image
+    ctx.drawImage(this._mapTerrain, 0, 0, W, H);
+
+    // World-space → canvas pixel
+    const toCanvas = (wx, wz) => ({
+      x: (wx / S + 0.5) * W,
+      y: (wz / S + 0.5) * H,
+    });
+
+    // POI labels
+    ctx.font = 'bold 11px "Segoe UI", Arial';
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    for (const poi of this.world.pois) {
+      const { x, y } = toCanvas(poi.x, poi.z);
+      ctx.strokeText(poi.name, x, y);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(poi.name, x, y);
+    }
+
+    // Player marker
+    const pp = this.player.getPosition();
+    const { x: px, y: py } = toCanvas(pp.x, pp.z);
+    const yaw = this.player.getYaw();
+
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(-yaw);
+    ctx.fillStyle = '#00ff88';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -9); ctx.lineTo(5, 6); ctx.lineTo(0, 3); ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Build HUD ─────────────────────────────────────────────────────────────
+  _buildBuildHUD() {
+    this._buildHudEl = document.createElement('div');
+    this._buildHudEl.id = 'build-hud';
+    this._buildHudEl.innerHTML = `
+      <span class="bh-mode">BUILD</span>
+      <span class="bh-sep">·</span>
+      <span class="bh-cur" id="bh-cur-type">Wall</span>
+      <span class="bh-sep">·</span>
+      <span class="bh-keys">Z/X/C · R rotate · B exit</span>
+    `;
+    this._buildHudEl.style.display = 'none';
+    document.getElementById('hud').appendChild(this._buildHudEl);
+  }
+
+  _updateBuildHUD() {
+    if (!this._buildHudEl) return;
+    this._buildHudEl.style.display = this.building.active ? 'flex' : 'none';
+    const cur = document.getElementById('bh-cur-type');
+    if (cur) cur.textContent = this.building.typeLabel;
+  }
+
   // ── Game Loop ─────────────────────────────────────────────────────────────
   _startLoop() {
     const loop = () => {
@@ -473,15 +728,25 @@ class Game {
 
       this.player.update(dt);
       this.camera3P.update(dt, this.shake);
+      this.building?.update(this.camera);
       this.inventory.update(dt);
       this.weapons.update(dt, this.player, this.camera);
       this.pickups.update(dt, this.player);
 
       const remotes = this.net ? this.net.getRemotePlayers() : null;
-      this.projectiles.update(dt, this.player, this.enemies, this.particles, remotes);
+      const activeEnemies = this.zombieWaves ?? this.enemies;
+      this.projectiles.update(dt, this.player, activeEnemies, this.particles, remotes);
 
-      if (this.enemies) this.enemies.update(dt, this.player, this.camera);
-      this.storm.update(dt, this.player);
+      if (this.enemies)     this.enemies.update(dt, this.player, this.camera);
+      if (this.zombieWaves) {
+        this.zombieWaves.update(dt, this.player, this.camera);
+        // Hide inter-wave countdown while fighting
+        if (this._zombieEl) {
+          this._zombieEl.style.display =
+            this.zombieWaves.state === 'intermission' ? 'block' : 'none';
+        }
+      }
+      if (this.storm) this.storm.update(dt, this.player);
       this.particles.update(dt);
       this.shake.update(dt);
       this.muzzle.update(dt);

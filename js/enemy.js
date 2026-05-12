@@ -11,7 +11,7 @@ const PATROL_SPEED   = MOVE_SPEED * 0.38;
 const STATE = { PATROL: 0, CHASE: 1, ATTACK: 2, DEAD: 3 };
 
 // ── Enemy ────────────────────────────────────────────────────────────────────
-class Enemy {
+export class Enemy {
   constructor(scene, world, position) {
     this.scene     = scene;
     this.world     = world;

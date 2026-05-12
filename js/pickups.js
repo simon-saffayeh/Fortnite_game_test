@@ -1,27 +1,13 @@
 import * as THREE from 'three';
 
 const DEFS = {
-  medkit: {
-    id: 'medkit', label: 'Med Kit',
-    healHp: 50, healShield: 0,
-    color: 0x00ee66, scale: 0.9,
-  },
-  bigmed: {
-    id: 'bigmed', label: 'Big Med',
-    healHp: 100, healShield: 0,
-    color: 0x00ff88, scale: 1.2,
-  },
-  shield: {
-    id: 'shield', label: 'Shield Sip',
-    healHp: 0, healShield: 25,
-    color: 0x44aaff, scale: 0.8,
-  },
-  bigshield: {
-    id: 'bigshield', label: 'Big Shield',
-    healHp: 0, healShield: 50,
-    color: 0x2266ff, scale: 1.15,
-  },
+  medkit:    { id: 'medkit',    label: 'Med Kit',     healHp: 50,  healShield: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true },
+  bigmed:    { id: 'bigmed',    label: 'Big Med',      healHp: 100, healShield: 0,  color: 0x00ff88, scale: 1.2,  isConsumable: true },
+  shield:    { id: 'shield',    label: 'Shield Sip',   healHp: 0,   healShield: 25, color: 0x44aaff, scale: 0.8,  isConsumable: true },
+  bigshield: { id: 'bigshield', label: 'Big Shield',   healHp: 0,   healShield: 50, color: 0x2266ff, scale: 1.15, isConsumable: true },
 };
+
+export { DEFS as CONSUMABLE_DEFS };
 
 // ── Single pickup object ──────────────────────────────────────────────────────
 class HealthPickup {
@@ -119,6 +105,26 @@ const SPAWN_LIST = [
   { id: 'medkit',    x: -70, z: -20 }, { id: 'bigmed',    x:  10, z:  90 },
   { id: 'shield',    x: -50, z:  50 }, { id: 'bigshield', x:  90, z:  10 },
   { id: 'medkit',    x: -90, z: -10 }, { id: 'shield',    x:  30, z: -80 },
+
+  // ── POI indoor health loot ───────────────────────────────────────────
+  // Cedar Creek
+  { id: 'medkit',    x: 100,  z:   1  },
+  { id: 'shield',    x:  99,  z:  -1  },
+  // Fort Ironwatch
+  { id: 'bigmed',    x: -130, z:  64  },
+  { id: 'bigshield', x: -130, z:  33  },
+  // Ancient Temple
+  { id: 'shield',    x:  36,  z: -161 },
+  // Military Compound
+  { id: 'medkit',    x: -51,  z:  81  },
+  { id: 'bigshield', x: -67,  z:  73  },
+  // Olsen's Farm
+  { id: 'medkit',    x: 151,  z: -74  },
+  { id: 'shield',    x: 171,  z: -76  },
+  // Whalen's Town
+  { id: 'bigmed',    x: -124, z: -141 },
+  { id: 'shield',    x: -124, z:  -97 },
+  { id: 'medkit',    x: -102, z: -119 },
 ];
 
 export class PickupManager {
@@ -158,14 +164,10 @@ export class PickupManager {
   }
 
   /** Try to collect the nearest pickup. Returns the def if collected, null otherwise. */
-  tryCollect(player) {
+  tryCollect() {
     const p = this._nearbyPickup;
     if (!p) return null;
-
     const def = p.def;
-    if (def.healHp    > 0) player.health = Math.min(player.maxHealth, player.health + def.healHp);
-    if (def.healShield > 0) player.healShield(def.healShield);
-
     p.collect();
     return def;
   }

@@ -39,6 +39,9 @@ export class Player {
     this.heldWeapon = null;    // weapon def (not instance)
     this.adsActive  = false;   // right-mouse held
 
+    // Set by main.js to BuildingSystem for structural collision
+    this.collisionProvider = null;
+
     // Callbacks wired by main.js
     this.onDamage = null;
     this.onDeath  = null;
@@ -215,6 +218,7 @@ export class Player {
     if (this.dead) return;
     this._handleMouse();
     this._handleMovement(dt);
+    this._collideWithBuildings();
     this._applyGravity(dt);
     this._collideWithTerrain();
     this._animateBody(dt);
@@ -223,7 +227,7 @@ export class Player {
   }
 
   _handleMouse() {
-    const sens = 0.0018;
+    const sens = 0.0018 * (this._sensMultiplier ?? 1.0);
     this.yaw   -= this._mouseX * sens;
     this.pitch -= this._mouseY * sens;
     this.pitch  = Math.max(-Math.PI / 2.6, Math.min(Math.PI / 4, this.pitch));
@@ -262,8 +266,29 @@ export class Player {
     this.root.position.y += this.velocity.y * dt;
   }
 
+  _collideWithBuildings() {
+    if (!this.collisionProvider) return;
+    const push = this.collisionProvider.getWallPush(
+      this.root.position.x, this.root.position.y, this.root.position.z, 0.42
+    );
+    if (!push) return;
+    this.root.position.x += push.x;
+    this.root.position.z += push.z;
+    if (Math.abs(push.x) > 0.001) this.velocity.x = 0;
+    if (Math.abs(push.z) > 0.001) this.velocity.z = 0;
+  }
+
   _collideWithTerrain() {
-    const groundY = this.world.getTerrainHeight(this.root.position.x, this.root.position.z);
+    let groundY = this.world.getTerrainHeight(this.root.position.x, this.root.position.z);
+
+    // Check build pieces for additional standing surfaces (floors and ramps)
+    if (this.collisionProvider) {
+      const buildY = this.collisionProvider.getHeightAt(
+        this.root.position.x, this.root.position.z, this.root.position.y
+      );
+      if (buildY !== null) groundY = Math.max(groundY, buildY);
+    }
+
     const standY  = groundY + FOOT_OFFSET;
     const was     = this.grounded;
     if (this.root.position.y <= standY) {
@@ -335,6 +360,12 @@ export class Player {
     }
 
     p.head.rotation.x = this.pitch * 0.6;
+  }
+
+  get isMovingInput() {
+    const k = this._keys;
+    return !!(k['KeyW'] || k['KeyS'] || k['KeyA'] || k['KeyD'] ||
+              k['ArrowUp'] || k['ArrowDown'] || k['ArrowLeft'] || k['ArrowRight']);
   }
 
   getPosition() { return this.root.position; }

@@ -21,6 +21,7 @@ export class ThirdPersonCamera {
     this._bobY     = 0;
 
     this._leanRoll = 0;
+    this._smoothEyeY = null;
 
     // FPS — never show the local player's body
     this.player.body.visible = false;
@@ -59,13 +60,16 @@ export class ThirdPersonCamera {
     const sinY  = Math.sin(yaw),  cosY = Math.cos(yaw);
     const sinP  = Math.sin(pitch), cosP = Math.cos(pitch);
 
-    // Eye position
-    const eyePos = new THREE.Vector3(playerPos.x, playerPos.y + EYE_HEIGHT, playerPos.z);
+    // Eye position — smooth Y to filter terrain-snap jitter on steep slopes
+    const targetEyeY = playerPos.y + EYE_HEIGHT;
+    if (this._smoothEyeY === null) this._smoothEyeY = targetEyeY;
+    this._smoothEyeY = THREE.MathUtils.lerp(this._smoothEyeY, targetEyeY, dt * 18);
+    const eyePos = new THREE.Vector3(playerPos.x, this._smoothEyeY, playerPos.z);
 
     // Head bob — smaller amplitude than TPS
     const vel   = this.player.velocity;
     const speed = Math.sqrt(vel.x * vel.x + vel.z * vel.z);
-    if (speed > 0.5 && this.player.grounded) {
+    if (speed > 0.5 && this.player.airTime < 0.18 && this.player.isMovingInput) {
       const bobRate = this.player._isSprinting ? 9.5 : 6.5;
       this._bobPhase += dt * bobRate;
       const bobAmt = (this.player._isSprinting ? 0.05 : 0.025) * Math.min(speed / 8, 1);

@@ -17,7 +17,19 @@
       </div>
       <div class="home-buttons">
         <button id="btn-solo">SOLO</button>
+        <button id="btn-zombie">ZOMBIE</button>
         <button id="btn-multiplayer">MULTIPLAYER</button>
+      </div>
+      <label class="build-option">
+        <input type="checkbox" id="build-toggle" checked />
+        <span class="build-option-label">Enable Building</span>
+      </label>
+      <div class="options-panel">
+        <div class="options-row">
+          <label class="options-label" for="sens-slider">SENSITIVITY</label>
+          <input id="sens-slider" type="range" min="0.2" max="5.0" step="0.1" value="1.0" class="options-range" />
+          <span class="options-value" id="sens-value">1.0</span>
+        </div>
       </div>
       <p class="home-hint">Multiplayer requires <code>node server.js</code> running on the host machine.</p>
     </div>
@@ -54,6 +66,15 @@
 
   <canvas id="game-canvas"></canvas>
 
+  <!-- ── Full-screen Map ── -->
+  <div id="map-overlay" class="hidden">
+    <div class="map-panel">
+      <div class="map-title">BATTLE ISLE — MAP</div>
+      <canvas id="map-canvas" width="512" height="512"></canvas>
+      <div class="map-hint">M — close</div>
+    </div>
+  </div>
+
   <div id="hud" class="hidden">
     <div id="health-container">
       <div class="stat-label">HP</div>
@@ -86,7 +107,7 @@
       <span id="ammo-reserve">--</span>
     </div>
     <div id="controls-hint">
-      WASD — Move &nbsp;|&nbsp; Space — Jump &nbsp;|&nbsp; Shift — Sprint &nbsp;|&nbsp; LMB — Shoot &nbsp;|&nbsp; E — Pick up &nbsp;|&nbsp; R — Reload &nbsp;|&nbsp; G — Drop &nbsp;|&nbsp; 1-5 — Slots
+      WASD — Move &nbsp;|&nbsp; Space — Jump &nbsp;|&nbsp; Shift — Sprint &nbsp;|&nbsp; LMB — Shoot &nbsp;|&nbsp; E — Pick up &nbsp;|&nbsp; F — Use Item &nbsp;|&nbsp; R — Reload &nbsp;|&nbsp; G — Drop &nbsp;|&nbsp; 1-5 — Slots &nbsp;|&nbsp; <b>B</b> — Build Mode (Z Wall · X Floor · C Ramp · R Rotate)
     </div>
   </div>
 

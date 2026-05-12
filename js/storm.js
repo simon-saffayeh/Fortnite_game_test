@@ -2,13 +2,13 @@ import * as THREE from 'three';
 
 // Each phase: wait N seconds still, then shrink over shrinkTime seconds to endRadius
 const PHASES = [
-  { endRadius: 160, waitTime: 50, shrinkTime: 30, dmgPerSec: 0.6 },
-  { endRadius:  90, waitTime: 35, shrinkTime: 25, dmgPerSec: 1.2 },
-  { endRadius:  40, waitTime: 25, shrinkTime: 20, dmgPerSec: 2.5 },
-  { endRadius:  12, waitTime: 18, shrinkTime: 15, dmgPerSec: 5.0 },
+  { endRadius: 240, waitTime: 60, shrinkTime: 35, dmgPerSec: 0.6 },
+  { endRadius: 130, waitTime: 40, shrinkTime: 28, dmgPerSec: 1.2 },
+  { endRadius:  60, waitTime: 28, shrinkTime: 22, dmgPerSec: 2.5 },
+  { endRadius:  18, waitTime: 20, shrinkTime: 16, dmgPerSec: 5.0 },
 ];
 
-const START_RADIUS = 220;
+const START_RADIUS = 340;
 const CENTER       = new THREE.Vector3(18, 0, -12);
 const WALL_HEIGHT  = 350;
 

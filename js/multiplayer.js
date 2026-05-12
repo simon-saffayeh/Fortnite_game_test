@@ -171,6 +171,7 @@ export class NetworkManager {
     this.onRemoteHit    = null;
     this.onRemoteDeath  = null;
     this.onLocalHit     = null; // (damage, fromId) → void
+    this.onRemoteBuild  = null; // (msg) => void
   }
 
   connect(url) {
@@ -197,6 +198,7 @@ export class NetworkManager {
   sendShoot(orig, dir)   { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z] }); }
   sendHit(targetId, dmg) { this.send({ type: 'hit', targetId, damage: dmg }); }
   sendDeath()            { this.send({ type: 'death' }); }
+  sendBuild(pieceType, x, y, z, rotY) { this.send({ type: 'build', pieceType, x, y, z, rotY }); }
 
   _handle(msg) {
     switch (msg.type) {
@@ -273,6 +275,10 @@ export class NetworkManager {
           this.remotePlayers.get(msg.id).die();
         }
         if (this.onRemoteDeath) this.onRemoteDeath(msg);
+        break;
+
+      case 'build':
+        if (this.onRemoteBuild) this.onRemoteBuild(msg);
         break;
     }
   }

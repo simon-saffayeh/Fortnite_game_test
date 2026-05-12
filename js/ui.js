@@ -13,6 +13,7 @@ export class HUD {
     this._minimap    = document.getElementById('minimap');
     this._mmCtx      = this._minimap.getContext('2d');
     this._mapScale   = 150 / world.size;
+    this._mmViewRange = 90; // world-units visible each side of player on minimap
 
     this._pickupManager = null;
     this._adsActive     = false;
@@ -70,6 +71,12 @@ export class HUD {
         name.textContent = 'Empty';
         ammo.textContent = '';
         el.style.borderColor = '';
+      } else if (item.isConsumable) {
+        const c = '#' + item.def.color.toString(16).padStart(6, '0');
+        icon.style.background = c;
+        name.textContent = item.def.label;
+        ammo.textContent = `x${item.count}`;
+        el.style.borderColor = i === active ? '#fff' : c + '88';
       } else {
         const c = '#' + item.def.rarityColor.toString(16).padStart(6, '0');
         icon.style.background = c;
@@ -82,12 +89,16 @@ export class HUD {
     }
 
     const activeItem = this.inventory.getActive();
-    document.getElementById('ammo-current').textContent = activeItem
-      ? (activeItem.reloading ? 'RLD' : activeItem.ammo)
-      : '--';
-    document.getElementById('ammo-reserve').textContent = activeItem
-      ? activeItem.reserve
-      : '--';
+    if (!activeItem) {
+      document.getElementById('ammo-current').textContent = '--';
+      document.getElementById('ammo-reserve').textContent = '--';
+    } else if (activeItem.isConsumable) {
+      document.getElementById('ammo-current').textContent = 'F';
+      document.getElementById('ammo-reserve').textContent = `x${activeItem.count}`;
+    } else {
+      document.getElementById('ammo-current').textContent = activeItem.reloading ? 'RLD' : activeItem.ammo;
+      document.getElementById('ammo-reserve').textContent = activeItem.reserve;
+    }
   }
 
   // ── Storm HUD ────────────────────────────────────────────────────────────
@@ -112,6 +123,12 @@ export class HUD {
   }
 
   _updateStorm() {
+    if (!this.storm) {
+      if (this._stormPhaseEl) this._stormPhaseEl.textContent = '';
+      if (this._stormStateEl) this._stormStateEl.textContent = '';
+      if (this._stormWarn) this._stormWarn.style.display = 'none';
+      return;
+    }
     const info = this.storm.getInfo();
     this._stormPhaseEl.textContent = `STORM PHASE ${info.phase}`;
 
@@ -159,7 +176,7 @@ export class HUD {
         const c = '#' + hp.def.color.toString(16).padStart(6, '0');
         this._pickupPrompt.style.display = 'block';
         this._pickupPrompt.innerHTML =
-          `<span style="color:${c}">+</span> Press <b>E</b> to use <b>${hp.def.label}</b>`;
+          `<span style="color:${c}">+</span> Press <b>E</b> to pick up <b>${hp.def.label}</b> <span style="opacity:0.7">(F to use)</span>`;
         return;
       }
     }
@@ -266,39 +283,41 @@ export class HUD {
     if (this._scopeEl) this._scopeEl.classList.toggle('active', active && sniper);
   }
 
-  // ── Static minimap ────────────────────────────────────────────────────────
+  // ── Static minimap (full-res heightmap, 256×256) ─────────────────────────
   _prerenderStaticMap() {
+    const R  = this.world.resolution; // 256
+    const S  = this.world.size;
+    const hm = this.world.heightmap;
+    const wl = this.world.waterLevel;
+
     const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 150;
+    canvas.width = canvas.height = R;
     const ctx = canvas.getContext('2d');
-    const S   = this.world.size;
-    const sc  = this._mapScale;
-    const R   = this.world.resolution;
-    const hm  = this.world.heightmap;
+    const img = ctx.createImageData(R, R);
+    const d   = img.data;
 
-    ctx.fillStyle = '#1a5276';
-    ctx.fillRect(0, 0, 150, 150);
-
-    const step = Math.max(1, Math.floor(R / 55));
-    for (let i = 0; i < R; i += step) {
-      for (let j = 0; j < R; j += step) {
-        const h  = hm[i * R + j];
-        if (h <= this.world.waterLevel) continue;
-        const wx = (j / R - 0.5) * S;
-        const wz = (i / R - 0.5) * S;
-        const mx = wx * sc + 75;
-        const mz = wz * sc + 75;
-        const t  = Math.min(1, Math.max(0, h / 30));
-        const g  = Math.floor(55 + t * 110);
-        ctx.fillStyle = `rgb(15,${g},15)`;
-        ctx.fillRect(mx, mz, step * sc + 1, step * sc + 1);
+    for (let iz = 0; iz < R; iz++) {
+      for (let ix = 0; ix < R; ix++) {
+        const h = hm[iz * R + ix];
+        let r, g, b;
+        if (h <= wl)  { r = 28;  g = 72;  b = 145; }
+        else if (h < 2)  { r = 205; g = 172; b = 110; }
+        else if (h < 14) { r = 62;  g = 118; b = 44;  }
+        else if (h < 26) { r = 85;  g = 78;  b = 65;  }
+        else             { r = 210; g = 214; b = 228; }
+        // Subtle hillshade
+        const nh = ix + 1 < R ? hm[iz * R + ix + 1] : h;
+        const sh = Math.max(-22, Math.min(22, (h - nh) * 3));
+        const idx = (iz * R + ix) * 4;
+        d[idx]   = Math.max(0, Math.min(255, r + sh));
+        d[idx+1] = Math.max(0, Math.min(255, g + sh * 0.8));
+        d[idx+2] = Math.max(0, Math.min(255, b + sh * 0.5));
+        d[idx+3] = 255;
       }
     }
+    ctx.putImageData(img, 0, 0);
 
-    ctx.fillStyle = '#9e8060';
-    for (const s of this.world.structures) {
-      ctx.fillRect(s.position.x * sc + 75 - 2, s.position.z * sc + 75 - 2, 5, 5);
-    }
+
     return canvas;
   }
 
@@ -343,41 +362,77 @@ export class HUD {
   }
 
   _updateCrosshair() {
-    const p      = this.player;
-    const moving = Math.abs(p.velocity.x) > 0.5 || Math.abs(p.velocity.z) > 0.5;
+    const p = this.player;
     let gap = 6;
-    if (this._adsActive)    gap = 3;   // tightest when aiming
-    else if (!p.grounded)   gap = 22;
+    if (this._adsActive)     gap = 3;
+    else if (p.airTime > 0.15) gap = 22;
     else if (p._isSprinting) gap = 18;
-    else if (moving)        gap = 12;
+    else if (p.isMovingInput) gap = 12;
     const ch = document.getElementById('crosshair');
     if (ch) ch.style.setProperty('--gap', gap + 'px');
   }
 
   _drawMinimap() {
-    const ctx = this._mmCtx;
-    ctx.drawImage(this._staticMap, 0, 0);
+    const ctx  = this._mmCtx;
+    const SIZE = 150;                      // minimap canvas px
+    const VR   = this._mmViewRange;        // world units visible each side
+    const S    = this.world.size;
+    const R    = this._staticMap.width;    // static map resolution (256)
+
+    const pp  = this.player.getPosition();
+    // static-map scale: R px = S world units
+    const smSc = R / S;
+    // minimap scale: SIZE/2 px = VR world units
+    const mmSc = (SIZE / 2) / VR;
+
+    // Source rect on static map centred on player
+    const halfPx = VR * smSc;             // half source-rect size in static-map px
+    const srcX = pp.x * smSc + R / 2 - halfPx;
+    const srcZ = pp.z * smSc + R / 2 - halfPx;
+
+    // Draw terrain: crop & scale static map around player
+    ctx.drawImage(this._staticMap,
+      srcX, srcZ, halfPx * 2, halfPx * 2,
+      0, 0, SIZE, SIZE);
 
     ctx.save();
     ctx.beginPath();
-    ctx.arc(75, 75, 74, 0, Math.PI * 2);
+    ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 1, 0, Math.PI * 2);
     ctx.clip();
 
-    const sc = this._mapScale;
+    // Convert world pos to minimap px (player-relative, always centred)
+    const toMM = (wx, wz) => ({
+      x: (wx - pp.x) * mmSc + SIZE / 2,
+      y: (wz - pp.z) * mmSc + SIZE / 2,
+    });
 
-    // Storm safe-zone circle
+    // Storm circle
     if (this.storm) {
       const info = this.storm.getInfo();
-      const sr   = info.radius * sc;
-      const cx   = info.center.x * sc + 75;
-      const cz   = info.center.z * sc + 75;
+      const sr   = info.radius * mmSc;
+      const c    = toMM(info.center.x, info.center.z);
       ctx.strokeStyle = 'rgba(100,80,255,0.9)';
       ctx.lineWidth   = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cz, sr, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(80,40,220,0.06)';
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = 'rgba(80,40,220,0.06)'; ctx.fill();
+    }
+
+
+    // POI labels (smaller font for minimap)
+    if (this.world.pois) {
+      ctx.font = 'bold 10px "Segoe UI", Arial';
+      ctx.textAlign = 'center';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = 'round';
+      for (const poi of this.world.pois) {
+        const m = toMM(poi.x, poi.z);
+        const dx = m.x - SIZE / 2, dy = m.y - SIZE / 2;
+        if (dx * dx + dy * dy > (SIZE / 2) * (SIZE / 2)) continue;
+        ctx.strokeText(poi.name, m.x, m.y);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(poi.name, m.x, m.y);
+      }
     }
 
     // Enemy dots
@@ -385,11 +440,8 @@ export class HUD {
       ctx.fillStyle = '#ef4444';
       for (const e of this.enemyManager.enemies) {
         if (e.dead || !e.root) continue;
-        const mx = e.root.position.x * sc + 75;
-        const mz = e.root.position.z * sc + 75;
-        ctx.beginPath();
-        ctx.arc(mx, mz, 3, 0, Math.PI * 2);
-        ctx.fill();
+        const m = toMM(e.root.position.x, e.root.position.z);
+        ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
       }
     }
 
@@ -397,9 +449,9 @@ export class HUD {
     if (this._weaponSystem) {
       for (const p of this._weaponSystem.pickups) {
         if (p.collected) continue;
-        const c = '#' + p.def.rarityColor.toString(16).padStart(6, '0');
-        ctx.fillStyle = c;
-        ctx.fillRect(p.root.position.x * sc + 75 - 1.5, p.root.position.z * sc + 75 - 1.5, 3, 3);
+        const m = toMM(p.root.position.x, p.root.position.z);
+        ctx.fillStyle = '#' + p.def.rarityColor.toString(16).padStart(6, '0');
+        ctx.fillRect(m.x - 1.5, m.y - 1.5, 3, 3);
       }
     }
 
@@ -407,22 +459,18 @@ export class HUD {
     if (this._pickupManager) {
       for (const p of this._pickupManager.pickups) {
         if (p.collected) continue;
+        const m = toMM(p.root.position.x, p.root.position.z);
         ctx.fillStyle = p.def.healHp > 0 ? '#22ee66' : '#44aaff';
-        ctx.beginPath();
-        ctx.arc(p.root.position.x * sc + 75, p.root.position.z * sc + 75, 2.5, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(m.x, m.y, 2.5, 0, Math.PI * 2); ctx.fill();
       }
     }
 
-    // Player dot + direction arrow
-    const pp = this.player.getPosition();
-    const mx = pp.x * sc + 75;
-    const mz = pp.z * sc + 75;
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(mx, mz, 4, 0, Math.PI * 2); ctx.fill();
+    // Player arrow (always centred)
     ctx.save();
-    ctx.translate(mx, mz);
+    ctx.translate(SIZE / 2, SIZE / 2);
     ctx.rotate(-this.player.getYaw());
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#00eeff';
     ctx.beginPath(); ctx.moveTo(0, -9); ctx.lineTo(-4, 0); ctx.lineTo(4, 0); ctx.closePath(); ctx.fill();
     ctx.restore();
@@ -431,7 +479,7 @@ export class HUD {
 
     // Border ring
     ctx.strokeStyle = 'rgba(255,255,255,0.22)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath(); ctx.arc(75, 75, 74, 0, Math.PI * 2); ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 1, 0, Math.PI * 2); ctx.stroke();
   }
 }
