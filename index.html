@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Battle Isle</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- ── Home Screen ── -->
+  <div id="home-screen">
+    <div class="home-content">
+      <h1 class="game-title">BATTLE ISLE</h1>
+      <div class="home-name-row">
+        <label class="name-label" for="player-name">NAME</label>
+        <input id="player-name" type="text" maxlength="16" placeholder="Enter name…" autocomplete="off" />
+      </div>
+      <div class="home-buttons">
+        <button id="btn-solo">SOLO</button>
+        <button id="btn-multiplayer">MULTIPLAYER</button>
+      </div>
+      <p class="home-hint">Multiplayer requires <code>node server.js</code> running on the host machine.</p>
+    </div>
+  </div>
+
+  <!-- ── Lobby Screen ── -->
+  <div id="lobby-screen" class="hidden">
+    <div class="lobby-content">
+      <h2 class="lobby-title">LOBBY</h2>
+      <div id="lobby-share">
+        <span class="share-label">Share this URL with friends on the same network:</span>
+        <span id="lobby-share-url"></span>
+      </div>
+      <div id="lobby-players"></div>
+      <p id="lobby-status"></p>
+      <div class="lobby-buttons">
+        <button id="btn-ready">READY UP</button>
+        <button id="btn-start-game" class="hidden">START GAME</button>
+        <button id="btn-lobby-back">← BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Loading Screen ── -->
+  <div id="loading-screen" class="hidden">
+    <div class="loading-content">
+      <h1 class="game-title">BATTLE ISLE</h1>
+      <div class="loading-bar-container">
+        <div class="loading-bar" id="loading-bar"></div>
+      </div>
+      <p class="loading-text" id="loading-text">Loading world...</p>
+    </div>
+  </div>
+
+  <canvas id="game-canvas"></canvas>
+
+  <div id="hud" class="hidden">
+    <div id="health-container">
+      <div class="stat-label">HP</div>
+      <div class="stat-bar-bg">
+        <div class="stat-bar" id="health-bar"></div>
+      </div>
+      <div class="stat-value" id="health-value">100</div>
+    </div>
+    <div id="shield-container">
+      <div class="stat-label">SHIELD</div>
+      <div class="stat-bar-bg">
+        <div class="stat-bar shield" id="shield-bar"></div>
+      </div>
+      <div class="stat-value" id="shield-value">0</div>
+    </div>
+    <div id="crosshair">
+      <div class="ch-t"></div>
+      <div class="ch-r"></div>
+      <div class="ch-b"></div>
+      <div class="ch-l"></div>
+      <div class="ch-dot"></div>
+    </div>
+    <div id="minimap-container">
+      <canvas id="minimap" width="150" height="150"></canvas>
+      <div class="minimap-label">MAP</div>
+    </div>
+    <div id="ammo-display">
+      <span id="ammo-current">--</span>
+      <span class="ammo-sep">/</span>
+      <span id="ammo-reserve">--</span>
+    </div>
+    <div id="controls-hint">
+      WASD — Move &nbsp;|&nbsp; Space — Jump &nbsp;|&nbsp; Shift — Sprint &nbsp;|&nbsp; LMB — Shoot &nbsp;|&nbsp; E — Pick up &nbsp;|&nbsp; R — Reload &nbsp;|&nbsp; G — Drop &nbsp;|&nbsp; 1-5 — Slots
+    </div>
+  </div>
+
+  <!-- Three.js -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
