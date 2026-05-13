@@ -4,7 +4,7 @@ import { Player }            from './player.js';
 import { ThirdPersonCamera } from './camera.js';
 import { HUD }               from './ui.js';
 import { ParticleSystem }    from './particles.js';
-import { WeaponSystem, WeaponInstance, WEAPON_DEFS } from './weapons.js';
+import { WeaponSystem, WeaponInstance, WEAPON_DEFS, buildGunModel } from './weapons.js';
 import { Inventory }         from './inventory.js';
 import { ProjectileSystem }  from './projectile.js';
 import { EnemyManager }      from './enemy.js';
@@ -346,15 +346,37 @@ class Game {
     // ── Heal channel progress ─────────────────────────────────────────
     this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
 
-    // ── Starting pistol ───────────────────────────────────────────────
-    this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.pistol));
-
-    // ── Testing mode loadout ──────────────────────────────────────────
+    // ── Starting weapon ───────────────────────────────────────────────
     if (this.testingEnabled) {
-      this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.minigun));
-      this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.bombLauncher));
+      for (const id of ['phaseRifle', 'sniper', 'rocketLauncher', 'thunderLance', 'minigun', 'bombLauncher']) {
+        this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS[id]));
+      }
       this.player._sprintMultiplier = 2.0;
+    } else {
+      this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.pistol));
     }
+
+    // ── Prewarm gun model cache + explosion particle materials + shaders ──
+    // Building each gun model once at startup populates the cache so future
+    // pickups clone instead of re-allocating geometry/materials; doing it now
+    // (before the first render) folds the shader compile into the load screen
+    // instead of stuttering the first time the player swaps weapons.
+    for (const id of Object.keys(WEAPON_DEFS)) {
+      buildGunModel(WEAPON_DEFS[id], 0.58);
+      buildGunModel(WEAPON_DEFS[id], 1.15);
+    }
+    // Prewarm common burst-particle materials (nuke, normal explosion, hit fx)
+    const _warmColors = [
+      [0xffffff, 0.9], [0xff7700, 0.65], [0xff3300, 0.55], [0xffdd00, 0.45],
+      [0xff2200, 0.22], [0x333333, 0.75], [0x222222, 1.0], [0xff5500, 0.55],
+      [0x884422, 0.55], [0x553322, 0.8], [0x222211, 0.6],
+      [0xff6600, 0.35], [0xffdd00, 0.2], [0x888888, 0.15],
+      [0xffee00, 0.25], [0xaaddff, 0.15], [0xffffff, 0.1], [0xffee00, 0.15],
+      [0xff1111, 0.2],
+    ];
+    for (const [c, s] of _warmColors) this.particles._getBurstMaterial(c, s);
+    // Force shader compile for everything currently in scene
+    this.renderer.compile(this.scene, this.camera);
 
     // ── Wire callbacks ────────────────────────────────────────────────
     this._totalEnemies = this.enemies?.enemies.length ?? 0;
@@ -463,9 +485,9 @@ class Game {
       };
     }
 
-    this.projectiles.onEnemyHit = (pos, damage, _enemy, justKilled) => {
+    this.projectiles.onEnemyHit = (pos, damage, _enemy, justKilled, headshot) => {
       const numPos = pos.clone().add(new THREE.Vector3(0, 0.8, 0));
-      this.dmgNums.show(numPos, damage, this.camera, this.canvas, damage >= 80);
+      this.dmgNums.show(numPos, damage, this.camera, this.canvas, headshot);
       if (justKilled) this.dmgNums.showKill(numPos, this.camera, this.canvas);
       this.hitMark.hit(justKilled);
     };

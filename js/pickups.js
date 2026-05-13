@@ -5,6 +5,8 @@ const DEFS = {
   bigmed:    { id: 'bigmed',    label: 'Big Med',    healHp: 100, healShield: 0,  color: 0x00ff88, scale: 1.2,  isConsumable: true, useTime: 5.0 },
   shield:    { id: 'shield',    label: 'Shield Sip', healHp: 0,   healShield: 25, color: 0x44aaff, scale: 0.8,  isConsumable: true, useTime: 2.0 },
   bigshield: { id: 'bigshield', label: 'Big Shield', healHp: 0,   healShield: 50, color: 0x2266ff, scale: 1.15, isConsumable: true, useTime: 4.0 },
+  // Unique: heals HP and shield simultaneously in one fast injection
+  stimpack:  { id: 'stimpack',  label: 'Stim Pack',  healHp: 30,  healShield: 30, color: 0xff6600, scale: 0.85, isConsumable: true, useTime: 1.5 },
 };
 
 export { DEFS as CONSUMABLE_DEFS };
@@ -24,7 +26,25 @@ class HealthPickup {
 
     const lm = hex => new THREE.MeshLambertMaterial({ color: hex });
 
-    if (def.healHp > 0) {
+    if (def.id === 'stimpack') {
+      // Stim pack: orange syringe — cylinder body + plunger + needle
+      const s = def.scale;
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08 * s, 0.08 * s, 0.38 * s, 10),
+        new THREE.MeshLambertMaterial({ color: def.color, transparent: true, opacity: 0.85 }));
+      barrel.castShadow = true; this.root.add(barrel);
+      // Plunger cap (top)
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.10 * s, 0.10 * s, 0.06 * s, 10), lm(0xcc3300));
+      cap.position.y = 0.22 * s; this.root.add(cap);
+      // Needle (bottom)
+      const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.015 * s, 0.006 * s, 0.16 * s, 6), lm(0xcccccc));
+      needle.position.y = -0.27 * s; this.root.add(needle);
+      // Liquid fill line (inner darker band)
+      const fill = new THREE.Mesh(new THREE.CylinderGeometry(0.065 * s, 0.065 * s, 0.22 * s, 10), lm(0xff4400));
+      fill.position.y = 0.05 * s; this.root.add(fill);
+      // Label band
+      const label = new THREE.Mesh(new THREE.CylinderGeometry(0.083 * s, 0.083 * s, 0.12 * s, 10), lm(0xffffff));
+      label.position.y = 0.08 * s; this.root.add(label);
+    } else if (def.healHp > 0) {
       // Med kit: green box with white cross
       const s = def.scale;
       const body = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.32 * s, 0.5 * s), lm(def.color));
@@ -105,6 +125,7 @@ const SPAWN_LIST = [
   { id: 'medkit',    x: -70, z: -20 }, { id: 'bigmed',    x:  10, z:  90 },
   { id: 'shield',    x: -50, z:  50 }, { id: 'bigshield', x:  90, z:  10 },
   { id: 'medkit',    x: -90, z: -10 }, { id: 'shield',    x:  30, z: -80 },
+  { id: 'stimpack',  x:  20, z:  40 }, { id: 'stimpack',  x: -55, z: -65 },
 
   // ── POI indoor health loot ───────────────────────────────────────────
   // Cedar Creek — main cabin SW and NW corners, clear of sofa/table cluster
@@ -125,6 +146,10 @@ const SPAWN_LIST = [
   { id: 'bigmed',    x: -125, z: -145  },
   { id: 'shield',    x: -118, z:  -98  },
   { id: 'medkit',    x:  -99, z: -121  },
+  // Samuel's Mansion — stimpack in vault, bigshield in library
+  { id: 'stimpack',  x:  171, z:  164  },
+  { id: 'bigshield', x:  171, z:  145  },
+  { id: 'bigmed',    x:  190, z:  120  },
 ];
 
 export class PickupManager {

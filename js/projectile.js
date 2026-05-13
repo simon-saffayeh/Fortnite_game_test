@@ -152,12 +152,14 @@ export class ProjectileSystem {
       // Expire at range
       if (b.traveled >= b.range) {
         if (b.def?.explosive) this._explode(b, b.position.clone(), particles, player, enemyManager);
+        if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
         this._kill(b); continue;
       }
 
       // Terrain collision
       const groundY = this.world.getTerrainHeight(b.position.x, b.position.z);
       if (b.position.y < groundY) {
+        if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
         } else if (particles) {
@@ -172,6 +174,7 @@ export class ProjectileSystem {
       // Building collision (player-built structures)
       if (this.buildingSystem) {
         if (this.buildingSystem.checkBullet(b.prevPosition, b.position, b.damage)) {
+          if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
           if (b.def?.explosive) {
             this._explode(b, b.position.clone(), particles, player, enemyManager);
           } else if (particles) {
@@ -186,6 +189,7 @@ export class ProjectileSystem {
 
       // Static world structure collision (POI buildings, walls, etc.)
       if (this.world.staticCollider.checkBullet(b.prevPosition, b.position)) {
+        if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
         } else if (particles) {
@@ -233,19 +237,43 @@ export class ProjectileSystem {
           enemy.root.position.z
         );
         if (segmentSphere(b.prevPosition, b.position, ec, 0.95)) {
+          // Headshot: bullet impact Y above the enemy's neck line (root.y + 1.6)
+          const headshot = b.position.y > enemy.root.position.y + 1.6;
+          const finalDmg = headshot ? b.damage * 2 : b.damage;
           const wasDead = enemy.dead;
-          enemy.takeDamage(b.damage);
-          if (particles) particles.spawnBurst(b.position.clone(), {
-            count: 12, color: 0xff2200, speed: 4, lifetime: 0.3, size: 0.15,
-          });
+          enemy.takeDamage(finalDmg);
+          if (particles) {
+            if (headshot) {
+              particles.spawnBurst(b.position.clone(), { count: 20, color: 0xffdd00, speed: 6, lifetime: 0.35, size: 0.18 });
+              particles.spawnBurst(b.position.clone(), { count: 10, color: 0xff4400, speed: 9, lifetime: 0.25, size: 0.12 });
+            } else {
+              particles.spawnBurst(b.position.clone(), { count: 12, color: 0xff2200, speed: 4, lifetime: 0.3, size: 0.15 });
+            }
+          }
           if (this.onEnemyHit) {
-            this.onEnemyHit(b.position.clone(), b.damage, enemy, !wasDead && enemy.dead);
+            this.onEnemyHit(b.position.clone(), finalDmg, enemy, !wasDead && enemy.dead, headshot);
+          }
+          // Phase Rifle: teleport player to impact location
+          if (b.def?.teleport) {
+            const tp = b.position.clone();
+            tp.y = Math.max(tp.y, this.world.getTerrainHeight(tp.x, tp.z) + 0.5);
+            player.root.position.copy(tp);
+            player.velocity.set(0, 0, 0);
+            if (particles) particles.spawnBurst(tp, { count: 30, color: 0xff1111, speed: 8, lifetime: 0.4, size: 0.2 });
           }
           this._kill(b);
           break;
         }
       }
     }
+  }
+
+  _doTeleport(b, pos, player, particles) {
+    const tp = pos.clone();
+    tp.y = Math.max(tp.y, this.world.getTerrainHeight(tp.x, tp.z) + 0.5);
+    player.root.position.copy(tp);
+    player.velocity.set(0, 0, 0);
+    if (particles) particles.spawnBurst(tp, { count: 30, color: 0xff1111, speed: 8, lifetime: 0.4, size: 0.2 });
   }
 
   _explode(b, pos, particles, player, enemyManager) {
@@ -258,10 +286,18 @@ export class ProjectileSystem {
     const radius = def.explosionRadius ?? 8;
     const dmg    = def.explosionDamage ?? 80;
 
+    // Thunder Lance uses electric arc particles instead of fire
+    const isThunder = def.id === 'thunderLance';
     if (particles) {
-      particles.spawnBurst(pos.clone(), { count: 40, color: 0xff6600, speed: 12, lifetime: 0.6, size: 0.35 });
-      particles.spawnBurst(pos.clone(), { count: 20, color: 0xffdd00, speed: 6,  lifetime: 0.4, size: 0.2  });
-      particles.spawnBurst(pos.clone(), { count: 15, color: 0x888888, speed: 5,  lifetime: 0.8, size: 0.15 });
+      if (isThunder) {
+        particles.spawnBurst(pos.clone(), { count: 50, color: 0xffee00, speed: 14, lifetime: 0.5, size: 0.25 });
+        particles.spawnBurst(pos.clone(), { count: 30, color: 0xaaddff, speed: 8,  lifetime: 0.3, size: 0.15 });
+        particles.spawnBurst(pos.clone(), { count: 20, color: 0xffffff, speed: 18, lifetime: 0.2, size: 0.1  });
+      } else {
+        particles.spawnBurst(pos.clone(), { count: 40, color: 0xff6600, speed: 12, lifetime: 0.6, size: 0.35 });
+        particles.spawnBurst(pos.clone(), { count: 20, color: 0xffdd00, speed: 6,  lifetime: 0.4, size: 0.2  });
+        particles.spawnBurst(pos.clone(), { count: 15, color: 0x888888, speed: 5,  lifetime: 0.8, size: 0.15 });
+      }
     }
 
     const pp = player.getPosition();
@@ -280,6 +316,22 @@ export class ProjectileSystem {
           const wasDead = e.dead;
           e.takeDamage(dmg * falloff);
           if (this.onEnemyHit) this.onEnemyHit(ex.clone(), dmg * falloff, e, !wasDead && e.dead);
+        }
+      }
+
+      // Thunder Lance: chain lightning — deal full chainDamage to every other enemy
+      // within chainRadius regardless of falloff (no damage sharing, each gets full hit)
+      if (def.chainExplosion && def.chainRadius && def.chainDamage) {
+        for (const e of enemyManager.enemies) {
+          if (e.dead || !e.root) continue;
+          const ex = e.root.position;
+          const cd = Math.sqrt((ex.x-pos.x)**2 + (ex.y+1-pos.y)**2 + (ex.z-pos.z)**2);
+          if (cd >= radius && cd < def.chainRadius) {
+            const wasDead = e.dead;
+            e.takeDamage(def.chainDamage);
+            if (particles) particles.spawnBurst(ex.clone(), { count: 20, color: 0xffee00, speed: 6, lifetime: 0.3, size: 0.15 });
+            if (this.onEnemyHit) this.onEnemyHit(ex.clone(), def.chainDamage, e, !wasDead && e.dead);
+          }
         }
       }
     }

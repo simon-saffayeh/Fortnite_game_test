@@ -257,13 +257,19 @@ body {
   animation: dmgFloat 0.9s ease-out forwards;
 }
 .dmg-num.crit {
-  color: #ffcc00; font-size: 28px;
-  text-shadow: 0 0 10px rgba(255,180,0,0.7);
+  color: #ff8800; font-size: 28px;
+  text-shadow: 0 0 10px rgba(255,120,0,0.7);
 }
 .dmg-num.kill-tag {
   color: #ff5533; font-size: 13px; font-weight: 700;
   letter-spacing: 2px; text-transform: uppercase;
   animation: dmgFloat 1.4s ease-out forwards;
+}
+.dmg-num.headshot-tag {
+  color: #ffee00; font-size: 13px; font-weight: 900;
+  letter-spacing: 3px; text-transform: uppercase;
+  text-shadow: 0 0 12px rgba(255,220,0,0.85);
+  animation: dmgFloat 1.0s ease-out forwards;
 }
 @keyframes dmgFloat {
   0%   { opacity: 1; transform: translate(-50%, -50%); }

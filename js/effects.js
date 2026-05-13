@@ -73,6 +73,20 @@ export class DamageNumbers {
     setTimeout(() => div.remove(), 900);
   }
 
+  showHeadshot(worldPos, camera, canvas) {
+    const proj = worldPos.clone().project(camera);
+    if (proj.z > 1) return;
+    const x = (proj.x *  0.5 + 0.5) * canvas.clientWidth;
+    const y = (proj.y * -0.5 + 0.5) * canvas.clientHeight;
+    const div = document.createElement('div');
+    div.className = 'dmg-num headshot-tag';
+    div.textContent = 'HEADSHOT';
+    div.style.left = x + 'px';
+    div.style.top  = (y - 28) + 'px';
+    this._el.appendChild(div);
+    setTimeout(() => div.remove(), 1000);
+  }
+
   showKill(worldPos, camera, canvas) {
     const proj = worldPos.clone().project(camera);
     if (proj.z > 1) return;

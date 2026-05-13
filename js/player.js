@@ -241,9 +241,10 @@ export class Player {
 
   _handleMovement(dt) {
     const k      = this._keys;
-    const sprint = (k['ShiftLeft'] || k['ShiftRight']) && !this.adsActive;
+    const testingMode = (this._sprintMultiplier ?? 1.0) > 1.0;
+    const sprint = testingMode && (k['ShiftLeft'] || k['ShiftRight']) && !this.adsActive;
     const adsSlow = this.adsActive ? 0.55 : 1.0;
-    const sprintMult = sprint ? (this._sprintMultiplier ?? 1.0) : 1.0;
+    const sprintMult = sprint ? this._sprintMultiplier : 1.0;
     const speed  = (sprint ? SPRINT_SPEED : MOVE_SPEED) * adsSlow * sprintMult;
     const dir    = new THREE.Vector3();
     if (k['KeyW'] || k['ArrowUp'])    dir.z -= 1;

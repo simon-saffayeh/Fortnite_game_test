@@ -66,6 +66,19 @@ export class ParticleSystem {
    * @param {THREE.Vector3} pos
    * @param {object} opts - { count, color, speed, lifetime, size }
    */
+  _getBurstMaterial(color, size) {
+    if (!this._burstMatCache) this._burstMatCache = new Map();
+    const key = `${color}_${size}`;
+    let mat = this._burstMatCache.get(key);
+    if (!mat) {
+      mat = new THREE.PointsMaterial({
+        size, color, transparent: true, opacity: 1, depthWrite: false,
+      });
+      this._burstMatCache.set(key, mat);
+    }
+    return mat;
+  }
+
   spawnBurst(pos, opts = {}) {
     const count    = opts.count    || 24;
     const color    = opts.color    || 0xffaa33;
@@ -76,7 +89,6 @@ export class ParticleSystem {
     const geo = new THREE.BufferGeometry();
     const positions  = new Float32Array(count * 3);
     const velocities = [];
-    const c = new THREE.Color(color);
 
     for (let i = 0; i < count; i++) {
       positions[i * 3]     = pos.x;
@@ -90,14 +102,8 @@ export class ParticleSystem {
     }
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
-    const mat = new THREE.PointsMaterial({
-      size,
-      color,
-      transparent: true,
-      opacity: 1,
-      depthWrite: false,
-    });
-
+    // Clone shared material so per-emitter opacity fade doesn't affect others
+    const mat = this._getBurstMaterial(color, size).clone();
     const points = new THREE.Points(geo, mat);
     this.scene.add(points);
 
@@ -148,7 +154,11 @@ export class ParticleSystem {
 
     // Remove expired emitters
     const dead = this.emitters.filter(e => e.age >= e.lifetime);
-    dead.forEach(e => this.scene.remove(e.points));
+    dead.forEach(e => {
+      this.scene.remove(e.points);
+      e.points.geometry.dispose();
+      e.points.material.dispose();
+    });
     this.emitters = this.emitters.filter(e => e.age < e.lifetime);
   }
 }

@@ -79,10 +79,66 @@ export const WEAPON_DEFS = {
     explosive: true, explosionRadius: 45, explosionDamage: 280,
     gravity: -10,
   },
+  // ── New weapons ──────────────────────────────────────────────────────────────
+  handCannon: {
+    id: 'handCannon', name: 'Hand Cannon',
+    damage: 68, fireRate: 0.70, bulletSpeed: 320, range: 230,
+    spread: 0.010, magSize: 7, reloadTime: 1.9,
+    rarityColor: 0x888888, rarity: 'Common', auto: false, pellets: 1,
+  },
+  crossbow: {
+    id: 'crossbow', name: 'Crossbow',
+    damage: 98, fireRate: 1.1, bulletSpeed: 210, range: 290,
+    spread: 0.004, magSize: 1, reloadTime: 1.4,
+    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
+    silent: true,
+  },
+  scoutRifle: {
+    id: 'scoutRifle', name: 'Scout Rifle',
+    damage: 64, fireRate: 0.40, bulletSpeed: 470, range: 390,
+    spread: 0.011, magSize: 10, reloadTime: 2.1,
+    rarityColor: 0x0088ff, rarity: 'Rare', auto: false, pellets: 1,
+  },
+  huntingRifle: {
+    id: 'huntingRifle', name: 'Hunting Rifle',
+    damage: 108, fireRate: 1.05, bulletSpeed: 490, range: 430,
+    spread: 0.007, magSize: 1, reloadTime: 1.9,
+    rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
+  },
+  // ── Unique weapons ───────────────────────────────────────────────────────────
+  // Thunder Lance: slow electric orb — on explosion chains FULL damage to every enemy
+  // within chainRadius (no falloff for chained targets). Wipe groups instantly.
+  thunderLance: {
+    id: 'thunderLance', name: 'Thunder Lance',
+    damage: 80, fireRate: 1.5, bulletSpeed: 52, range: 360,
+    spread: 0.003, magSize: 6, reloadTime: 3.2,
+    rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
+    explosive: true, explosionRadius: 5, explosionDamage: 80,
+    chainExplosion: true, chainRadius: 15, chainDamage: 60,
+  },
+  // Phase Rifle: bullet travels slowly — when it hits anything the player
+  // instantly teleports to that location. Fire into a window, teleport inside.
+  phaseRifle: {
+    id: 'phaseRifle', name: 'Phase Rifle',
+    damage: 45, fireRate: 1.6, bulletSpeed: 85, range: 460,
+    spread: 0.002, magSize: 4, reloadTime: 2.8,
+    rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 1,
+    teleport: true,
+  },
 };
 
 // ── Gun 3D model builder ─────────────────────────────────────────────────────
+const _gunModelCache = new Map();
 export function buildGunModel(def, scale = 1) {
+  const key = `${def.id}_${scale}`;
+  const cached = _gunModelCache.get(key);
+  if (cached) return cached.clone(true);
+  const built = _buildGunModelRaw(def, scale);
+  _gunModelCache.set(key, built);
+  return built.clone(true);
+}
+
+function _buildGunModelRaw(def, scale = 1) {
   const g = new THREE.Group();
   const m = hex => new THREE.MeshLambertMaterial({ color: hex });
   const box = (w, h, d, hex, px, py, pz) => {
@@ -207,6 +263,82 @@ export function buildGunModel(def, scale = 1) {
     g.add(box(0.04, 0.09, 0.16, 0x111111, 0, -0.09, 0.10)); // trigger
     g.add(box(0.09, 0.12, 0.18, 0x444433, 0, 0.14, 0.32)); // sight
 
+  } else if (def.id === 'handCannon') {
+    // Heavy chunky pistol — thick barrel, big grip
+    g.add(box(0.16, 0.22, 0.58, 0x444444, 0, 0, 0));            // body
+    g.add(box(0.09, 0.09, 0.38, 0x111111, 0, 0.08, -0.44));     // barrel
+    g.add(box(0.12, 0.28, 0.16, 0x333333, 0, -0.18, 0.14));     // grip
+    g.add(box(0.10, 0.07, 0.48, 0x666677, 0, 0.09, -0.04));     // slide
+    g.add(box(0.05, 0.10, 0.15, 0x111111, 0, -0.09, 0.02));     // trigger guard
+    g.add(box(0.06, 0.06, 0.12, 0x888888, 0, 0.10, -0.50));     // muzzle comp
+
+  } else if (def.id === 'crossbow') {
+    // Crossbow: horizontal limbs + stock
+    g.add(box(0.08, 0.10, 0.80, 0x5c3d1e, 0, 0, 0));            // stock/body
+    g.add(box(0.50, 0.05, 0.08, 0x4a2e14, 0, 0.06, -0.30));     // limbs (horizontal bow)
+    g.add(box(0.52, 0.02, 0.02, 0x888888, 0, 0.06, -0.30));     // string
+    g.add(box(0.05, 0.05, 0.36, 0x3a2a10, 0, 0.08, -0.15));     // rail / track
+    g.add(box(0.10, 0.20, 0.14, 0x3a2a10, 0, -0.14, 0.28));     // pistol grip
+    g.add(box(0.04, 0.07, 0.14, 0x111111, 0, -0.07, 0.14));     // trigger
+    g.add(box(0.03, 0.03, 0.22, 0xccaa55, 0, 0.08, -0.16));     // bolt (arrow) on rail
+
+  } else if (def.id === 'scoutRifle') {
+    // DMR — long barrel, scope, bipod legs
+    g.add(box(0.11, 0.16, 1.00, 0x3a3a4a, 0, 0, 0));            // body
+    g.add(box(0.04, 0.04, 0.50, 0x111111, 0, 0.05, -0.72));     // barrel
+    g.add(box(0.09, 0.10, 0.32, 0x2a2a3a, 0, -0.02, 0.60));     // stock
+    g.add(box(0.08, 0.22, 0.12, def.rarityColor, 0, -0.18, 0.10)); // mag
+    g.add(box(0.09, 0.18, 0.12, 0x222222, 0, -0.15, 0.30));     // grip
+    g.add(cyl(0.038, 0.38, def.rarityColor, 0, 0.14, -0.08, Math.PI/2)); // scope tube
+    // Bipod legs
+    g.add(box(0.02, 0.14, 0.02, 0x555555, -0.06, -0.04, -0.55));
+    g.add(box(0.02, 0.14, 0.02, 0x555555,  0.06, -0.04, -0.55));
+
+  } else if (def.id === 'huntingRifle') {
+    // Bolt-action — wood stock, long barrel, no mag (single shot)
+    g.add(box(0.10, 0.14, 1.10, 0x6b4226, 0, 0, 0));            // wood body
+    g.add(box(0.04, 0.04, 0.60, 0x111111, 0, 0.05, -0.84));     // barrel
+    g.add(box(0.10, 0.12, 0.42, 0x7a4e2e, 0, -0.02, 0.60));     // wood stock
+    g.add(box(0.09, 0.18, 0.12, 0x3a2a1a, 0, -0.13, 0.22));     // grip
+    g.add(box(0.04, 0.07, 0.13, 0x111111, 0, -0.07, 0.10));     // trigger
+    g.add(cyl(0.036, 0.32, 0x888888, 0, 0.13, -0.08, Math.PI/2)); // scope
+    // Bolt handle (sticks out the side)
+    g.add(box(0.16, 0.04, 0.04, 0x555555, 0.10, 0.06, 0.05));
+    g.add(cyl(0.035, 0.035, 0x444444, 0.18, 0.04, 0.05, 0));    // bolt knob
+
+  } else if (def.id === 'thunderLance') {
+    // Electric orb launcher — coiled housing, glowing emissive tip
+    g.add(box(0.15, 0.15, 0.82, 0x1a1a3a, 0, 0, 0));            // body
+    g.add(cyl(0.07, 0.60, 0x0a0a2a, 0, 0, -0.28, Math.PI/2));  // barrel tube
+    // Electric coil rings along barrel
+    for (const oz of [-0.10, -0.25, -0.40, -0.55]) {
+      g.add(cyl(0.09, 0.03, def.rarityColor, 0, 0, oz, Math.PI/2));
+    }
+    // Glowing orb muzzle
+    const orbMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), orbMat);
+    orb.position.set(0, 0, -0.62); g.add(orb);
+    g.add(box(0.11, 0.24, 0.14, 0x111122, 0, -0.18, 0.22));     // grip
+    g.add(box(0.04, 0.08, 0.15, 0x080810, 0, -0.08, 0.10));     // trigger
+    // Energy cell on top
+    g.add(box(0.06, 0.10, 0.26, def.rarityColor, 0, 0.13, 0.12));
+
+  } else if (def.id === 'phaseRifle') {
+    // Sleek futuristic teleport rifle — glowing phase coils, portal-disk muzzle
+    g.add(box(0.09, 0.12, 0.95, 0x0a0a22, 0, 0, 0));
+    g.add(box(0.04, 0.04, 0.55, 0x111133, 0, 0.04, -0.66));
+    for (const oz of [-0.20, -0.38, -0.56]) {
+      g.add(cyl(0.06, 0.025, def.rarityColor, 0, 0.04, oz, Math.PI/2));
+    }
+    const diskMat = new THREE.MeshBasicMaterial({ color: def.rarityColor, transparent: true, opacity: 0.9 });
+    const disk = new THREE.Mesh(new THREE.CircleGeometry(0.055, 10), diskMat);
+    disk.position.set(0, 0.04, -0.93); g.add(disk);
+    g.add(box(0.09, 0.20, 0.13, 0x0a0a22, 0, -0.15, 0.26));
+    g.add(box(0.04, 0.07, 0.13, 0x050510, 0, -0.07, 0.12));
+    const crystalMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
+    const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.045), crystalMat);
+    crystal.position.set(0, 0.12, -0.15); g.add(crystal);
+
   } else if (def.id === 'bombLauncher') {
     g.add(cyl(0.14, 0.75, 0x1a0000, 0, 0, 0, Math.PI/2)); // fat tube
     g.add(cyl(0.145,0.12, def.rarityColor, 0, 0, -0.38, Math.PI/2)); // front ring glowing
@@ -214,7 +346,6 @@ export function buildGunModel(def, scale = 1) {
     g.add(cyl(0.14, 0.12, def.rarityColor, 0, 0, 0.30, Math.PI/2)); // back ring
     g.add(box(0.11, 0.28, 0.15, 0x1a0000, 0, -0.22, 0.20)); // grip
     g.add(box(0.04, 0.10, 0.17, 0x220000, 0, -0.10, 0.08)); // trigger
-    // Glowing emissive dome on top
     const domeMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
     const dome = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), domeMat);
     dome.position.set(0, 0.16, 0.05); g.add(dome);
@@ -324,18 +455,30 @@ export class WeaponPickup {
 // ── Rarity spawn table ───────────────────────────────────────────────────────
 // Rarity weights: higher index = rarer. Weights must sum to 100.
 export const RARITY_POOL = [
-  { id: 'pistol',        weight: 20 },
-  { id: 'revolver',      weight: 15 },
-  { id: 'smg',           weight: 14 },
-  { id: 'burstRifle',    weight: 11 },
-  { id: 'ar',            weight: 12 },
-  { id: 'heavyAR',       weight: 8  },
-  { id: 'shotgun',       weight: 7  },
-  { id: 'dualPistols',   weight: 5  },
-  { id: 'sniper',        weight: 4  },
-  { id: 'rocketLauncher',weight: 3  },
-  { id: 'minigun',       weight: 1  },
-  { id: 'bombLauncher',  weight: 0.5},
+  // Common
+  { id: 'pistol',         weight: 16 },
+  { id: 'revolver',       weight: 12 },
+  { id: 'handCannon',     weight: 10 },
+  // Uncommon
+  { id: 'smg',            weight: 11 },
+  { id: 'burstRifle',     weight:  9 },
+  { id: 'crossbow',       weight:  7 },
+  // Rare
+  { id: 'ar',             weight:  9 },
+  { id: 'heavyAR',        weight:  6 },
+  { id: 'scoutRifle',     weight:  5 },
+  // Epic
+  { id: 'shotgun',        weight:  5 },
+  { id: 'dualPistols',    weight:  4 },
+  { id: 'huntingRifle',   weight:  3 },
+  // Legendary
+  { id: 'sniper',         weight:  3 },
+  { id: 'rocketLauncher', weight:  2 },
+  { id: 'thunderLance',   weight:  1 },
+  // Mythic
+  { id: 'minigun',        weight:  0.8},
+  { id: 'phaseRifle',     weight:  0.5},
+  { id: 'bombLauncher',   weight:  0.3},
 ];
 
 export function randomWeaponDef() {
