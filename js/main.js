@@ -89,7 +89,8 @@ class Menu {
     setTimeout(() => hs.style.display = 'none', 380);
 
     this._net = new NetworkManager();
-    const wsUrl = `ws://${window.location.host}/ws`;
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${proto}://${window.location.host}/ws`;
 
     try {
       await this._net.connect(wsUrl);
