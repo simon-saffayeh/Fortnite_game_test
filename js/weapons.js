@@ -72,11 +72,12 @@ export const WEAPON_DEFS = {
     explosive: true, explosionRadius: 8, explosionDamage: 120,
   },
   bombLauncher: {
-    id: 'bombLauncher', name: 'Bomb Launcher',
-    damage: 200, fireRate: 1.2, bulletSpeed: 60, range: 350,
-    spread: 0.008, magSize: 6, reloadTime: 4.0,
+    id: 'bombLauncher', name: 'Nuke Launcher',
+    damage: 30, fireRate: 5.0, bulletSpeed: 38, range: 480,
+    spread: 0.002, magSize: 2, reloadTime: 6.0,
     rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 1,
-    explosive: true, explosionRadius: 18, explosionDamage: 200,
+    explosive: true, explosionRadius: 45, explosionDamage: 280,
+    gravity: -10,
   },
 };
 
@@ -228,7 +229,7 @@ export class WeaponInstance {
   constructor(def) {
     this.def        = def;
     this.ammo       = def.magSize;
-    this.reserve    = def.magSize * 4;
+    this.reserve    = def.maxReserve !== undefined ? def.maxReserve : def.magSize * 4;
     this.reloading  = false;
     this._reloadT   = 0;
     this.fireCooldown = 0;

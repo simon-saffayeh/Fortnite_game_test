@@ -8,6 +8,13 @@ export class Inventory {
     this.player     = player;
     this.slots      = new Array(5).fill(null);  // WeaponInstance | null
     this.activeSlot = 0;
+
+    this._healing      = false;
+    this._healElapsed  = 0;
+    this._healDuration = 0;
+    this._healSlotIdx  = -1;
+    this.onHealProgress = null; // (progress: 0-1 | -1 for cancel, label: string) => void
+
     this._bindKeys();
   }
 
@@ -92,19 +99,41 @@ export class Inventory {
     return true;
   }
 
-  /** Use the active consumable if it is one. Returns true if used. */
-  useActive(player) {
+  /** Begin channeling the active consumable. Press F again to cancel. */
+  useActive(_player) {
     const s = this.slots[this.activeSlot];
     if (!s?.isConsumable) return false;
-    const def = s.def;
-    if (def.healHp    > 0) player.health = Math.min(player.maxHealth, player.health + def.healHp);
-    if (def.healShield > 0) player.healShield(def.healShield);
+
+    if (this._healing) {
+      this._cancelHeal();
+      return true;
+    }
+
+    this._healing      = true;
+    this._healElapsed  = 0;
+    this._healDuration = s.def.useTime ?? 3.0;
+    this._healSlotIdx  = this.activeSlot;
+    if (this.onHealProgress) this.onHealProgress(0, s.def.label);
+    return true;
+  }
+
+  _applyHeal(slotIdx) {
+    const s = this.slots[slotIdx];
+    if (!s?.isConsumable) return;
+    const p = this.player;
+    if (s.def.healHp    > 0) p.health = Math.min(p.maxHealth, p.health + s.def.healHp);
+    if (s.def.healShield > 0) p.healShield(s.def.healShield);
     s.count--;
     if (s.count <= 0) {
-      this.slots[this.activeSlot] = null;
-      this.player.setHeldWeapon(null);
+      this.slots[slotIdx] = null;
+      if (slotIdx === this.activeSlot) this.player.setHeldWeapon(null);
     }
-    return true;
+  }
+
+  _cancelHeal() {
+    this._healing     = false;
+    this._healElapsed = 0;
+    if (this.onHealProgress) this.onHealProgress(-1, '');
   }
 
   dropActive() {
@@ -118,5 +147,26 @@ export class Inventory {
 
   update(dt) {
     for (const s of this.slots) if (s && !s.isConsumable) s.update(dt);
+
+    if (!this._healing) return;
+
+    // Cancel if the item was removed or slot changed
+    const slot = this.slots[this._healSlotIdx];
+    if (!slot?.isConsumable) { this._cancelHeal(); return; }
+
+    // Cancel if player moves
+    if (this.player.isMovingInput) { this._cancelHeal(); return; }
+
+    this._healElapsed += dt;
+    const progress = Math.min(1, this._healElapsed / this._healDuration);
+    if (this.onHealProgress) this.onHealProgress(progress, slot.def.label);
+
+    if (this._healElapsed >= this._healDuration) {
+      this._applyHeal(this._healSlotIdx);
+      this._healing     = false;
+      this._healElapsed = 0;
+      if (this.onHealProgress) this.onHealProgress(1.0, slot.def.label);
+      setTimeout(() => { if (this.onHealProgress) this.onHealProgress(-1, ''); }, 350);
+    }
   }
 }

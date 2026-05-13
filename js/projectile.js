@@ -38,12 +38,13 @@ class Bullet {
     this.def      = opts.def      ?? null;
     this.traveled = 0;
     this.active   = true;
+    this._vy      = 0; // vertical velocity for gravity arc
 
-    // Color by faction
-    this.mat.color.setHex(this.faction === 'player' ? 0xffee44 : 0xff5522);
+    const isBomb = this.def?.id === 'bombLauncher';
+    this.mat.color.setHex(isBomb ? 0x111111 : (this.faction === 'player' ? 0xffee44 : 0xff5522));
+    this.mesh.scale.setScalar(isBomb ? 5 : 1);
 
     this.mesh.position.copy(origin);
-    // Orient cylinder along direction
     this.mesh.quaternion.setFromUnitVectors(_forward, this.direction);
     this.mesh.visible = true;
   }
@@ -69,11 +70,12 @@ export class ProjectileSystem {
     this.scene          = scene;
     this.world          = world;
     this._pool          = Array.from({ length: POOL_SIZE }, () => new Bullet(scene));
-    this.buildingSystem = null; // set by main.js after building is created
+    this.buildingSystem = null;
+    this._tempEffects   = []; // nuclear explosion mesh effects
 
     // Callbacks wired by main.js
-    this.onEnemyHit = null;  // (hitPos, damage, enemy) => void
-    this.onPlayerHit = null; // (sourcePos) => void
+    this.onEnemyHit = null;
+    this.onPlayerHit = null;
   }
 
   spawn(origin, direction, opts = {}) {
@@ -85,10 +87,64 @@ export class ProjectileSystem {
     const pp = player.getPosition();
     const playerCenter = new THREE.Vector3(pp.x, pp.y + 1.2, pp.z);
 
+    // Tick nuclear explosion mesh effects
+    this._tempEffects = this._tempEffects.filter(fx => {
+      fx.age += dt;
+      const t = Math.min(1, fx.age / fx.duration);
+      switch (fx.type) {
+        case 'flash': {
+          const s = fx.maxR * Math.min(t * 5, 1);
+          fx.mesh.scale.setScalar(s);
+          fx.mat.opacity = 0.85 * (1 - t);
+          break;
+        }
+        case 'ring': {
+          const s = fx.maxR * t;
+          fx.mesh.scale.set(s, s, s);
+          fx.mat.opacity = 0.65 * (1 - t * t);
+          break;
+        }
+        case 'column': {
+          const grow = Math.min(t * 2, 1);
+          fx.mesh.scale.x = fx.mesh.scale.z = fx.maxR * grow;
+          fx.mesh.scale.y = fx.maxH * grow;
+          fx.mesh.position.y = fx.baseY + fx.maxH * 0.5 * grow;
+          fx.mat.opacity = 0.75 * (1 - Math.max(0, t - 0.4) / 0.6);
+          break;
+        }
+        case 'cap': {
+          const emerge = Math.min(t * 3, 1);
+          const s = fx.maxR * emerge;
+          fx.mesh.scale.set(s, 1, s);
+          fx.mesh.position.y = fx.baseY + fx.riseH * Math.min(t * 2, 1);
+          fx.mat.opacity = 0.7 * (1 - Math.max(0, t - 0.5) / 0.5);
+          break;
+        }
+        case 'light':
+          fx.light.intensity = fx.maxI * (1 - t * t);
+          break;
+      }
+      const alive = fx.age < fx.duration;
+      if (!alive) {
+        if (fx.mesh)  this.scene.remove(fx.mesh);
+        if (fx.light) this.scene.remove(fx.light);
+      }
+      return alive;
+    });
+
     for (const b of this._pool) {
       if (!b.active) continue;
 
       b.prevPosition.copy(b.position);
+
+      // Gravity arc for bomb launcher
+      if (b.def?.gravity) {
+        b._vy = (b._vy ?? 0) + b.def.gravity * dt;
+        b.position.y += b._vy * dt;
+        // Spin the bomb visually
+        b.mesh.rotation.x += dt * 3;
+      }
+
       b.position.addScaledVector(b.direction, b.speed * dt);
       b.traveled += b.speed * dt;
       b.mesh.position.copy(b.position);
@@ -194,25 +250,26 @@ export class ProjectileSystem {
 
   _explode(b, pos, particles, player, enemyManager) {
     const def = b.def || {};
+    if (def.id === 'bombLauncher') {
+      this._nuclearExplosion(pos, def, particles, player, enemyManager);
+      return;
+    }
+
     const radius = def.explosionRadius ?? 8;
     const dmg    = def.explosionDamage ?? 80;
 
-    // Big particle burst
     if (particles) {
       particles.spawnBurst(pos.clone(), { count: 40, color: 0xff6600, speed: 12, lifetime: 0.6, size: 0.35 });
       particles.spawnBurst(pos.clone(), { count: 20, color: 0xffdd00, speed: 6,  lifetime: 0.4, size: 0.2  });
       particles.spawnBurst(pos.clone(), { count: 15, color: 0x888888, speed: 5,  lifetime: 0.8, size: 0.15 });
     }
 
-    // Player splash damage
     const pp = player.getPosition();
     const pd = Math.sqrt((pp.x-pos.x)**2 + (pp.y+1-pos.y)**2 + (pp.z-pos.z)**2);
     if (pd < radius) {
-      const falloff = 1 - pd / radius;
-      player.takeDamage(dmg * falloff, false, pos.clone());
+      player.takeDamage(dmg * (1 - pd / radius), false, pos.clone());
     }
 
-    // Enemy splash damage
     if (enemyManager) {
       for (const e of enemyManager.enemies) {
         if (e.dead || !e.root) continue;
@@ -226,6 +283,96 @@ export class ProjectileSystem {
         }
       }
     }
+  }
+
+  _nuclearExplosion(pos, def, particles, player, enemyManager) {
+    const radius = def.explosionRadius ?? 45;
+    const dmg    = def.explosionDamage ?? 280;
+
+    // ── Damage (quadratic falloff — devastating up close, survivable far away) ──
+    const pp = player.getPosition();
+    const pd = Math.sqrt((pp.x-pos.x)**2 + (pp.y+1-pos.y)**2 + (pp.z-pos.z)**2);
+    if (pd < radius) {
+      const f = 1 - pd / radius;
+      player.takeDamage(dmg * f * f, false, pos.clone());
+    }
+    if (enemyManager) {
+      for (const e of enemyManager.enemies) {
+        if (e.dead || !e.root) continue;
+        const ex = e.root.position;
+        const ed = Math.sqrt((ex.x-pos.x)**2 + (ex.y+1-pos.y)**2 + (ex.z-pos.z)**2);
+        if (ed < radius) {
+          const f = 1 - ed / radius;
+          const wasDead = e.dead;
+          e.takeDamage(dmg * f);
+          if (this.onEnemyHit) this.onEnemyHit(ex.clone(), dmg * f, e, !wasDead && e.dead);
+        }
+      }
+    }
+
+    // ── Particles ────────────────────────────────────────────────────────────
+    if (particles) {
+      // Blinding ground flash
+      particles.spawnBurst(pos.clone(), { count: 100, color: 0xffffff, speed: 30, lifetime: 0.25, size: 0.9 });
+      // Inner fireball
+      particles.spawnBurst(pos.clone(), { count: 140, color: 0xff7700, speed: 22, lifetime: 1.4, size: 0.65 });
+      particles.spawnBurst(pos.clone(), { count: 80,  color: 0xff3300, speed: 16, lifetime: 1.8, size: 0.55 });
+      particles.spawnBurst(pos.clone(), { count: 60,  color: 0xffdd00, speed: 25, lifetime: 0.9, size: 0.45 });
+      // Ember spray
+      particles.spawnBurst(pos.clone(), { count: 120, color: 0xff2200, speed: 28, lifetime: 2.2, size: 0.22 });
+      // Ground smoke ring
+      particles.spawnBurst(pos.clone(), { count: 80,  color: 0x333333, speed: 18, lifetime: 3.0, size: 0.75 });
+      particles.spawnBurst(pos.clone(), { count: 50,  color: 0x222222, speed: 8,  lifetime: 4.0, size: 1.0  });
+      // Rising fire column — staggered heights
+      const colBase = pos.clone();
+      for (let h = 4; h <= 24; h += 4) {
+        const p = colBase.clone().add(new THREE.Vector3(0, h, 0));
+        particles.spawnBurst(p, { count: 40, color: h < 14 ? 0xff5500 : 0x884422, speed: 7, lifetime: 2.5 + h * 0.06, size: 0.55 });
+      }
+      // Mushroom cap
+      const capPos = pos.clone().add(new THREE.Vector3(0, 26, 0));
+      particles.spawnBurst(capPos, { count: 100, color: 0x553322, speed: 14, lifetime: 3.5, size: 0.8 });
+      particles.spawnBurst(capPos, { count: 60,  color: 0x222211, speed: 20, lifetime: 2.8, size: 0.6 });
+    }
+
+    // ── Mesh effects ─────────────────────────────────────────────────────────
+    this._spawnNuclearMeshFX(pos);
+  }
+
+  _spawnNuclearMeshFX(pos) {
+    const mk = (geo, color, side = THREE.FrontSide) => {
+      const mat  = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthWrite: false, side });
+      const mesh = new THREE.Mesh(geo, mat);
+      this.scene.add(mesh);
+      return { mesh, mat };
+    };
+
+    // 1. Blinding flash sphere
+    const { mesh: flashM, mat: flashMat } = mk(new THREE.SphereGeometry(1, 14, 10), 0xffffff);
+    flashM.position.copy(pos);
+    this._tempEffects.push({ type: 'flash', mesh: flashM, mat: flashMat, age: 0, duration: 0.45, maxR: 18 });
+
+    // 2. Ground shockwave ring (flat torus)
+    const { mesh: ringM, mat: ringMat } = mk(new THREE.TorusGeometry(1, 0.55, 6, 48), 0xff9944, THREE.DoubleSide);
+    ringM.rotation.x = Math.PI / 2;
+    ringM.position.copy(pos).setY(pos.y + 0.4);
+    this._tempEffects.push({ type: 'ring', mesh: ringM, mat: ringMat, age: 0, duration: 1.8, maxR: 38 });
+
+    // 3. Fire column (cylinder rising upward)
+    const { mesh: colM, mat: colMat } = mk(new THREE.CylinderGeometry(1, 1, 1, 12), 0xff5500);
+    colM.position.copy(pos);
+    this._tempEffects.push({ type: 'column', mesh: colM, mat: colMat, age: 0, duration: 2.5, maxR: 9, maxH: 30, baseY: pos.y });
+
+    // 4. Mushroom cap (torus rising)
+    const { mesh: capM, mat: capMat } = mk(new THREE.TorusGeometry(1, 0.7, 8, 32), 0x553322, THREE.DoubleSide);
+    capM.position.copy(pos).setY(pos.y + 20);
+    this._tempEffects.push({ type: 'cap', mesh: capM, mat: capMat, age: 0, duration: 3.0, maxR: 14, baseY: pos.y + 20, riseH: 10 });
+
+    // 5. Point light
+    const light = new THREE.PointLight(0xff8822, 12, 120);
+    light.position.copy(pos).setY(pos.y + 5);
+    this.scene.add(light);
+    this._tempEffects.push({ type: 'light', light, age: 0, duration: 2.0, maxI: 12 });
   }
 
   _kill(b) {

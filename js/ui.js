@@ -26,6 +26,7 @@ export class HUD {
     this._buildSniperScope();
     this._buildEnemiesRemaining();
     this._buildPickupMessage();
+    this._buildHealBar();
 
     this._staticMap      = this._prerenderStaticMap();
     this._mmTimer        = 0;
@@ -176,7 +177,7 @@ export class HUD {
         const c = '#' + hp.def.color.toString(16).padStart(6, '0');
         this._pickupPrompt.style.display = 'block';
         this._pickupPrompt.innerHTML =
-          `<span style="color:${c}">+</span> Press <b>E</b> to pick up <b>${hp.def.label}</b> <span style="opacity:0.7">(F to use)</span>`;
+          `<span style="color:${c}">+</span> Press <b>E</b> to pick up <b>${hp.def.label}</b> <span style="opacity:0.7">(LMB to use)</span>`;
         return;
       }
     }
@@ -214,6 +215,33 @@ export class HUD {
     this._pickupMsgEl = document.createElement('div');
     this._pickupMsgEl.id = 'pickup-message';
     document.getElementById('hud').appendChild(this._pickupMsgEl);
+  }
+
+  // ── Heal channel bar ─────────────────────────────────────────────────────
+  _buildHealBar() {
+    this._healBarEl = document.createElement('div');
+    this._healBarEl.id = 'heal-bar-container';
+    this._healBarEl.style.display = 'none';
+    this._healBarEl.innerHTML = `
+      <div id="heal-bar-label">Using item…</div>
+      <div id="heal-bar-track"><div id="heal-bar-fill"></div></div>
+      <div id="heal-bar-hint">Stand still!</div>
+    `;
+    document.getElementById('hud').appendChild(this._healBarEl);
+    this._healBarFill = document.getElementById('heal-bar-fill');
+  }
+
+  /** progress: 0-1 while channeling, 1.0 on complete, -1 to hide */
+  setHealProgress(progress, label) {
+    if (progress < 0) {
+      this._healBarEl.style.display = 'none';
+      return;
+    }
+    this._healBarEl.style.display = 'flex';
+    document.getElementById('heal-bar-label').textContent = label;
+    this._healBarFill.style.width = `${Math.round(progress * 100)}%`;
+    const hint = document.getElementById('heal-bar-hint');
+    hint.textContent = progress >= 1 ? 'Done!' : 'Stand still!';
   }
 
   // ── Kill feed ─────────────────────────────────────────────────────────────

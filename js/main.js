@@ -56,30 +56,31 @@ class Menu {
     });
   }
 
-  _buildEnabled() {
-    return document.getElementById('build-toggle')?.checked ?? true;
-  }
+  _buildEnabled()   { return document.getElementById('build-toggle')?.checked   ?? false; }
+  _testingEnabled() { return document.getElementById('testing-toggle')?.checked ?? false; }
 
   _startSolo() {
     const hs = document.getElementById('home-screen');
-    const buildEnabled = this._buildEnabled();
+    const buildEnabled   = this._buildEnabled();
+    const testingEnabled = this._testingEnabled();
     hs.classList.add('fade-out');
     setTimeout(() => {
       hs.style.display = 'none';
       document.getElementById('loading-screen').classList.remove('hidden');
     }, 380);
-    setTimeout(() => new Game('solo', null, buildEnabled), 420);
+    setTimeout(() => new Game('solo', null, buildEnabled, testingEnabled), 420);
   }
 
   _startZombie() {
     const hs = document.getElementById('home-screen');
-    const buildEnabled = this._buildEnabled();
+    const buildEnabled   = this._buildEnabled();
+    const testingEnabled = this._testingEnabled();
     hs.classList.add('fade-out');
     setTimeout(() => {
       hs.style.display = 'none';
       document.getElementById('loading-screen').classList.remove('hidden');
     }, 380);
-    setTimeout(() => new Game('zombie', null, buildEnabled), 420);
+    setTimeout(() => new Game('zombie', null, buildEnabled, testingEnabled), 420);
   }
 
   async _openLobby() {
@@ -126,10 +127,11 @@ class Menu {
     };
 
     this._net.onGameStart = () => {
-      const buildEnabled = this._buildEnabled();
+      const buildEnabled   = this._buildEnabled();
+      const testingEnabled = this._testingEnabled();
       document.getElementById('lobby-screen').classList.add('hidden');
       document.getElementById('loading-screen').classList.remove('hidden');
-      setTimeout(() => new Game('multi', this._net, buildEnabled), 120);
+      setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled), 120);
     };
 
     document.getElementById('lobby-screen').classList.remove('hidden');
@@ -181,10 +183,11 @@ class Menu {
 
 // ── Game ──────────────────────────────────────────────────────────────────────
 class Game {
-  constructor(mode = 'solo', net = null, buildEnabled = true) {
-    this.mode         = mode;
-    this.net          = net;
-    this.buildEnabled = buildEnabled;
+  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false) {
+    this.mode           = mode;
+    this.net            = net;
+    this.buildEnabled   = buildEnabled;
+    this.testingEnabled = testingEnabled;
     this.canvas = document.getElementById('game-canvas');
     this.clock  = new THREE.Clock();
     this.running = false;
@@ -339,8 +342,18 @@ class Game {
     this.hud.setWeaponSystem(this.weapons);
     this.hud.setPickupManager(this.pickups);
 
+    // ── Heal channel progress ─────────────────────────────────────────
+    this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
+
     // ── Starting pistol ───────────────────────────────────────────────
     this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.pistol));
+
+    // ── Testing mode loadout ──────────────────────────────────────────
+    if (this.testingEnabled) {
+      this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.minigun));
+      this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.bombLauncher));
+      this.player._sprintMultiplier = 2.0;
+    }
 
     // ── Wire callbacks ────────────────────────────────────────────────
     this._totalEnemies = this.enemies?.enemies.length ?? 0;
@@ -471,6 +484,10 @@ class Game {
     window.addEventListener('keydown', e => {
       if (!this.running) return;
 
+      // Inventory panel
+      if (e.code === 'Tab') { e.preventDefault(); this._toggleInvPanel(); return; }
+      if (e.code === 'Escape' && this._invPanelOpen) { this._closeInvPanel(); return; }
+
       // Map
       if (e.code === 'KeyM') { this._toggleMap(); return; }
 
@@ -500,12 +517,10 @@ class Game {
         }
       }
 
-      if (e.code === 'KeyF') {
-        this.inventory.useActive(this.player);
-      }
     });
 
     if (this.building) this._buildBuildHUD();
+    this._buildInvPanel();
 
     window.addEventListener('resize', () => {
       this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -530,12 +545,17 @@ class Game {
       return;
     }
     const weapon = this.inventory?.getActive();
-    if (!weapon) { this._prevMouseDown = this.player.mouseDown; return; }
-
-    const now   = this.player.mouseDown;
-    const prev  = this._prevMouseDown;
-    const shoot = weapon.def.auto ? now : (now && !prev);
+    const now    = this.player.mouseDown;
+    const prev   = this._prevMouseDown;
     this._prevMouseDown = now;
+
+    // Left-click on consumable slot → start / cancel heal channel
+    if (!weapon || weapon.isConsumable) {
+      if (now && !prev) this.inventory.useActive(this.player);
+      return;
+    }
+
+    const shoot = weapon.def.auto ? now : (now && !prev);
     if (!shoot || !weapon.fire()) return;
 
     const camDir = new THREE.Vector3();
@@ -577,6 +597,7 @@ class Game {
     this.camera3P.setADS(ads, sniper);
     this.camera3P.setSprint(this.player._isSprinting && !ads);
     this.hud.setADS(ads, sniper);
+    this.player._scopeMultiplier = sniper ? 0.25 : ads ? 0.50 : 1.0;
   }
 
   // ── End screens ───────────────────────────────────────────────────────────
@@ -692,6 +713,115 @@ class Game {
     ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.restore();
+  }
+
+  // ── Inventory Panel (Tab) ────────────────────────────────────────────────
+  _buildInvPanel() {
+    this._invPanelOpen     = false;
+    this._invSelectedSlot  = -1;
+
+    const el = document.createElement('div');
+    el.id = 'inv-panel';
+    el.classList.add('hidden');
+    el.innerHTML = `
+      <div id="inv-panel-inner">
+        <div id="inv-panel-title">INVENTORY</div>
+        <div id="inv-panel-slots"></div>
+        <div id="inv-panel-hint">Click a slot to select · click another to swap · Tab / Esc to close</div>
+      </div>`;
+    document.body.appendChild(el);
+    this._invPanelEl = el;
+  }
+
+  _toggleInvPanel() {
+    if (this._invPanelOpen) this._closeInvPanel();
+    else                    this._openInvPanel();
+  }
+
+  _openInvPanel() {
+    this._invPanelOpen    = true;
+    this._invSelectedSlot = -1;
+    this._invPanelEl.classList.remove('hidden');
+    document.exitPointerLock();
+    this._renderInvPanel();
+  }
+
+  _closeInvPanel() {
+    this._invPanelOpen    = false;
+    this._invSelectedSlot = -1;
+    this._invPanelEl.classList.add('hidden');
+    this.canvas.requestPointerLock();
+  }
+
+  _renderInvPanel() {
+    const container = document.getElementById('inv-panel-slots');
+    container.innerHTML = '';
+    const slots = this.inventory.slots;
+
+    slots.forEach((item, i) => {
+      const row = document.createElement('div');
+      row.className = 'inv-panel-row' +
+        (i === this._invSelectedSlot ? ' selected' : '') +
+        (!item ? ' empty' : '');
+
+      let colorHex = 'rgba(255,255,255,0.12)';
+      let name     = 'Empty';
+      let detail   = '';
+
+      if (item) {
+        if (item.isConsumable) {
+          colorHex = '#' + item.def.color.toString(16).padStart(6, '0');
+          name     = item.def.label;
+          detail   = `x${item.count}`;
+        } else {
+          colorHex = '#' + item.def.rarityColor.toString(16).padStart(6, '0');
+          name     = item.def.name;
+          detail   = item.reloading ? 'Reloading…' : `${item.ammo} / ${item.reserve}`;
+        }
+      }
+
+      row.innerHTML = `
+        <div class="ip-num">${i + 1}</div>
+        <div class="ip-color" style="background:${colorHex}"></div>
+        <div class="ip-info">
+          <div class="ip-name">${name}</div>
+          <div class="ip-detail">${detail}</div>
+        </div>
+        ${item ? `<button class="ip-drop" data-slot="${i}">Drop</button>` : '<div class="ip-drop-spacer"></div>'}
+      `;
+
+      row.addEventListener('click', e => {
+        if (e.target.classList.contains('ip-drop')) return;
+        if (!item) { this._invSelectedSlot = -1; this._renderInvPanel(); return; }
+        if (this._invSelectedSlot === -1) {
+          this._invSelectedSlot = i;
+        } else if (this._invSelectedSlot === i) {
+          this._invSelectedSlot = -1;
+        } else {
+          // Swap
+          const tmp = this.inventory.slots[this._invSelectedSlot];
+          this.inventory.slots[this._invSelectedSlot] = this.inventory.slots[i];
+          this.inventory.slots[i] = tmp;
+          this.inventory.selectSlot(this.inventory.activeSlot);
+          this._invSelectedSlot = -1;
+        }
+        this._renderInvPanel();
+      });
+
+      const dropBtn = row.querySelector('.ip-drop');
+      if (dropBtn) {
+        dropBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          const si = parseInt(e.target.dataset.slot);
+          this.inventory.slots[si] = null;
+          if (si === this.inventory.activeSlot) this.player.setHeldWeapon(null);
+          if (this._invSelectedSlot === si) this._invSelectedSlot = -1;
+          this._renderInvPanel();
+        });
+      }
+
+      container.appendChild(row);
+    });
   }
 
   // ── Build HUD ─────────────────────────────────────────────────────────────

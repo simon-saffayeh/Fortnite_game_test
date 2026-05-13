@@ -310,8 +310,8 @@ export class World {
       const sampleR = 5;
       for (let i = 0; i < R; i++) {
         for (let j = 0; j < R; j++) {
-          const wx = (i / (R - 1) - 0.5) * S;
-          const wz = (j / (R - 1) - 0.5) * S;
+          const wx = (j / (R - 1) - 0.5) * S;
+          const wz = (i / (R - 1) - 0.5) * S;
           if ((wx - zone.x) ** 2 + (wz - zone.z) ** 2 < sampleR * sampleR)
             minH = Math.min(minH, this.heightmap[i * R + j]);
         }
@@ -322,8 +322,8 @@ export class World {
       const hardR = zone.r * 0.85;
       for (let i = 0; i < R; i++) {
         for (let j = 0; j < R; j++) {
-          const wx = (i / (R - 1) - 0.5) * S;
-          const wz = (j / (R - 1) - 0.5) * S;
+          const wx = (j / (R - 1) - 0.5) * S;
+          const wz = (i / (R - 1) - 0.5) * S;
           const d = Math.sqrt((wx - zone.x) ** 2 + (wz - zone.z) ** 2);
           if (d >= zone.r) continue;
           let blend;
@@ -1911,14 +1911,14 @@ export class World {
   }
 
   getSpawnPosition() {
-    // Find a flat-ish area near center
-    for (let r = 5; r < 80; r += 5) {
-      for (let a = 0; a < Math.PI * 2; a += 0.3) {
-        const x = Math.cos(a) * r;
-        const z = Math.sin(a) * r;
-        const h = this._getHeight(x, z);
-        if (h > 1 && h < 8) return new THREE.Vector3(x, h + 2, z);
-      }
+    // Random spawn anywhere on the playable island, above water, below peaks
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 40 + Math.random() * 170;
+      const x = Math.cos(a) * r;
+      const z = Math.sin(a) * r;
+      const h = this._getHeight(x, z);
+      if (h > 1.5 && h < 22) return new THREE.Vector3(x, h + 2, z);
     }
     return new THREE.Vector3(0, 10, 0);
   }

@@ -227,7 +227,9 @@ export class Player {
   }
 
   _handleMouse() {
-    const sens = 0.0018 * (this._sensMultiplier ?? 1.0);
+    const base  = 0.0018 * (this._sensMultiplier ?? 1.0);
+    const scope = this._scopeMultiplier ?? 1.0;
+    const sens  = base * scope;
     this.yaw   -= this._mouseX * sens;
     this.pitch -= this._mouseY * sens;
     this.pitch  = Math.max(-Math.PI / 2.6, Math.min(Math.PI / 4, this.pitch));
@@ -240,7 +242,8 @@ export class Player {
     const k      = this._keys;
     const sprint = (k['ShiftLeft'] || k['ShiftRight']) && !this.adsActive;
     const adsSlow = this.adsActive ? 0.55 : 1.0;
-    const speed  = (sprint ? SPRINT_SPEED : MOVE_SPEED) * adsSlow;
+    const sprintMult = sprint ? (this._sprintMultiplier ?? 1.0) : 1.0;
+    const speed  = (sprint ? SPRINT_SPEED : MOVE_SPEED) * adsSlow * sprintMult;
     const dir    = new THREE.Vector3();
     if (k['KeyW'] || k['ArrowUp'])    dir.z -= 1;
     if (k['KeyS'] || k['ArrowDown'])  dir.z += 1;

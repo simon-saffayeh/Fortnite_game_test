@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 
 const DEFS = {
-  medkit:    { id: 'medkit',    label: 'Med Kit',     healHp: 50,  healShield: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true },
-  bigmed:    { id: 'bigmed',    label: 'Big Med',      healHp: 100, healShield: 0,  color: 0x00ff88, scale: 1.2,  isConsumable: true },
-  shield:    { id: 'shield',    label: 'Shield Sip',   healHp: 0,   healShield: 25, color: 0x44aaff, scale: 0.8,  isConsumable: true },
-  bigshield: { id: 'bigshield', label: 'Big Shield',   healHp: 0,   healShield: 50, color: 0x2266ff, scale: 1.15, isConsumable: true },
+  medkit:    { id: 'medkit',    label: 'Med Kit',    healHp: 50,  healShield: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true, useTime: 3.0 },
+  bigmed:    { id: 'bigmed',    label: 'Big Med',    healHp: 100, healShield: 0,  color: 0x00ff88, scale: 1.2,  isConsumable: true, useTime: 5.0 },
+  shield:    { id: 'shield',    label: 'Shield Sip', healHp: 0,   healShield: 25, color: 0x44aaff, scale: 0.8,  isConsumable: true, useTime: 2.0 },
+  bigshield: { id: 'bigshield', label: 'Big Shield', healHp: 0,   healShield: 50, color: 0x2266ff, scale: 1.15, isConsumable: true, useTime: 4.0 },
 };
 
 export { DEFS as CONSUMABLE_DEFS };
@@ -107,24 +107,24 @@ const SPAWN_LIST = [
   { id: 'medkit',    x: -90, z: -10 }, { id: 'shield',    x:  30, z: -80 },
 
   // ── POI indoor health loot ───────────────────────────────────────────
-  // Cedar Creek
-  { id: 'medkit',    x: 100,  z:   1  },
-  { id: 'shield',    x:  99,  z:  -1  },
-  // Fort Ironwatch
-  { id: 'bigmed',    x: -130, z:  64  },
-  { id: 'bigshield', x: -130, z:  33  },
-  // Ancient Temple
-  { id: 'shield',    x:  36,  z: -161 },
-  // Military Compound
-  { id: 'medkit',    x: -51,  z:  81  },
-  { id: 'bigshield', x: -67,  z:  73  },
-  // Olsen's Farm
-  { id: 'medkit',    x: 151,  z: -74  },
-  { id: 'shield',    x: 171,  z: -76  },
-  // Whalen's Town
-  { id: 'bigmed',    x: -124, z: -141 },
-  { id: 'shield',    x: -124, z:  -97 },
-  { id: 'medkit',    x: -102, z: -119 },
+  // Cedar Creek — main cabin SW and NW corners, clear of sofa/table cluster
+  { id: 'medkit',    x:  95,  z:  -3.5 },
+  { id: 'shield',    x:  95,  z:   3.5 },
+  // Fort Ironwatch — barracks north of bed cluster; armory (no furniture)
+  { id: 'bigmed',    x: -130, z:  67   },
+  { id: 'bigshield', x: -130, z:  33   },
+  // Ancient Temple — open platform (no furniture)
+  { id: 'shield',    x:  36,  z: -161  },
+  // Military Compound — main bunker NE corner; secondary bunker NE corner
+  { id: 'medkit',    x: -43,  z:  83   },
+  { id: 'bigshield', x: -63,  z:  74   },
+  // Olsen's Farm — farmhouse SW corner; barn west end
+  { id: 'medkit',    x: 146,  z: -78   },
+  { id: 'shield',    x: 163,  z: -78   },
+  // Whalen's Town — church altar end; town hall east wall; tavern east wall
+  { id: 'bigmed',    x: -125, z: -145  },
+  { id: 'shield',    x: -118, z:  -98  },
+  { id: 'medkit',    x:  -99, z: -121  },
 ];
 
 export class PickupManager {

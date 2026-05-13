@@ -1,12 +1,18 @@
 import * as THREE from 'three';
 
-// ── Spawn points for up to 10 players (in world XZ coords) ───────────────────
+// ── Spawn points for up to 10 players — one per POI region + mid-map extras ──
+// Each point is 60+ units from every other point and on flat reachable terrain.
 export const MP_SPAWNS = [
-  [  20,   5 ], [ -20,   5 ],
-  [   5,  20 ], [   5, -20 ],
-  [  14,  14 ], [ -14,  14 ],
-  [  14, -14 ], [ -14, -14 ],
-  [  28,   0 ], [ -28,   0 ],
+  [  80,   15 ],  // Cedar Creek side
+  [ -110,   35 ],  // Fort Ironwatch side
+  [  55, -140 ],  // Ancient Temple side
+  [ -70,   95 ],  // Military Compound side
+  [ 140,  -90 ],  // Olsen's Farm side
+  [ -105, -105 ],  // Whalen's Town side
+  [   0,  120 ],  // north mid-map
+  [   0, -120 ],  // south mid-map
+  [ 120,   60 ],  // northeast
+  [ -120,  -40 ],  // west-central
 ];
 
 // ── Remote Player (3D character + name tag, driven by network) ────────────────
