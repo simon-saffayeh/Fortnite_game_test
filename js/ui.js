@@ -391,11 +391,23 @@ export class HUD {
 
   _updateCrosshair() {
     const p = this.player;
-    let gap = 6;
-    if (this._adsActive)     gap = 3;
-    else if (p.airTime > 0.15) gap = 22;
-    else if (p._isSprinting) gap = 18;
-    else if (p.isMovingInput) gap = 12;
+    const weapon = this.inventory.getActive();
+    const baseSpread = weapon?.def?.spread ?? 0.024;
+    const adsMultiplier = this._adsActive ? 0.4 : 1.0;
+    const spread = baseSpread * adsMultiplier;
+
+    // Scale: spread is in camera-space units; multiply by ~250 to get a pixel gap
+    // that visually matches where shots actually land at normal engagement ranges.
+    let gap = Math.round(spread * 250);
+
+    // Movement / air penalties mirror the gameplay spread multipliers
+    if (!this._adsActive) {
+      if (p.airTime > 0.15)  gap = Math.round(gap * 2.8);
+      else if (p._isSprinting) gap = Math.round(gap * 2.2);
+      else if (p.isMovingInput) gap = Math.round(gap * 1.6);
+    }
+
+    gap = Math.max(2, Math.min(gap, 80));
     const ch = document.getElementById('crosshair');
     if (ch) ch.style.setProperty('--gap', gap + 'px');
   }

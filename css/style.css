@@ -225,6 +225,8 @@ body {
 #death-screen   h1 { color: #ef4444; text-shadow: 0 0 40px rgba(239,68,68,0.6); }
 #victory-screen h1 { color: #f59e0b; text-shadow: 0 0 40px rgba(245,158,11,0.6); }
 .end-content p { color: rgba(255,255,255,0.55); font-size: 16px; margin-bottom: 32px; }
+.killed-by { color: rgba(255,255,255,0.8) !important; font-size: 18px !important; margin-bottom: 8px !important; }
+.killed-by strong { color: #ef4444; }
 .end-content button {
   border: none; border-radius: 8px;
   padding: 14px 40px; font-size: 16px; font-weight: 700; letter-spacing: 2px;

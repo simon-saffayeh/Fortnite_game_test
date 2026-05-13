@@ -251,6 +251,7 @@ class Game {
     this.world  = new World(this.scene);
     this.world.generate();
     await this.world.loadFurniture();
+    await this.world.loadNature();
 
     // ── Spawn position ───────────────────────────────────────────────────
     let spawnPos;
@@ -363,9 +364,9 @@ class Game {
       this.shake.shake(0.22);
       if (sourcePos) this.dirDmg.show(this.player.getPosition(), this.player.getYaw(), sourcePos);
     };
-    this.player.onDeath = () => {
+    this.player.onDeath = (killerLabel) => {
       if (this.net) this.net.sendDeath();
-      this._showDeathScreen();
+      this._showDeathScreen(killerLabel);
     };
 
     if (this.mode === 'solo') {
@@ -418,7 +419,8 @@ class Game {
       // Incoming damage from other players
       this.net.onLocalHit = (damage, fromId) => {
         const srcPos = this.net.remotePlayers.get(fromId)?.root.position ?? null;
-        this.player.takeDamage(damage, false, srcPos);
+        const killerName = this.net.players.get(fromId)?.name ?? 'a player';
+        this.player.takeDamage(damage, false, srcPos, killerName);
       };
 
       // Remote player died
@@ -562,7 +564,10 @@ class Game {
     this.camera.getWorldDirection(camDir);
     const origin = this.player.getPosition().clone().add(new THREE.Vector3(0, 1.55, 0));
     const adsMultiplier = this.player.adsActive ? 0.4 : 1.0;
-    const spread = weapon.def.spread * adsMultiplier;
+    const moveMult = !this.player.adsActive
+      ? (this.player.airTime > 0.15 ? 2.8 : this.player._isSprinting ? 2.2 : this.player.isMovingInput ? 1.6 : 1.0)
+      : 1.0;
+    const spread = weapon.def.spread * adsMultiplier * moveMult;
 
     for (let p = 0; p < weapon.def.pellets; p++) {
       const dir = camDir.clone().add(new THREE.Vector3(
@@ -601,14 +606,16 @@ class Game {
   }
 
   // ── End screens ───────────────────────────────────────────────────────────
-  _showDeathScreen() {
-    const label = this.mode === 'multi' ? `Kills: ${this._playerKills}` : `Enemies remaining: ${this._totalEnemies - this._killCount}`;
+  _showDeathScreen(killerLabel) {
+    const statsLabel = this.mode === 'multi' ? `Kills: ${this._playerKills}` : `Enemies remaining: ${this._totalEnemies - this._killCount}`;
+    const killedByLine = killerLabel ? `<p class="killed-by">Eliminated by <strong>${killerLabel}</strong></p>` : '';
     const el = document.createElement('div');
     el.id = 'death-screen';
     el.innerHTML = `<div class="end-content">
       <div class="end-icon">✕</div>
       <h1>ELIMINATED</h1>
-      <p>${label}</p>
+      ${killedByLine}
+      <p>${statsLabel}</p>
       <button onclick="location.reload()">Play Again</button>
     </div>`;
     document.body.appendChild(el);

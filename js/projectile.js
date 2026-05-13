@@ -200,7 +200,7 @@ export class ProjectileSystem {
       // Enemy bullets → hit player
       if (b.faction === 'enemy') {
         if (segmentSphere(b.prevPosition, b.position, playerCenter, 0.88)) {
-          player.takeDamage(b.damage, false, b.spawnOrigin.clone());
+          player.takeDamage(b.damage, false, b.spawnOrigin.clone(), 'an enemy bot');
           if (this.onPlayerHit) this.onPlayerHit(b.spawnOrigin.clone());
           this._kill(b);
         }
@@ -267,7 +267,7 @@ export class ProjectileSystem {
     const pp = player.getPosition();
     const pd = Math.sqrt((pp.x-pos.x)**2 + (pp.y+1-pos.y)**2 + (pp.z-pos.z)**2);
     if (pd < radius) {
-      player.takeDamage(dmg * (1 - pd / radius), false, pos.clone());
+      player.takeDamage(dmg * (1 - pd / radius), false, pos.clone(), 'your own explosion');
     }
 
     if (enemyManager) {
@@ -294,7 +294,7 @@ export class ProjectileSystem {
     const pd = Math.sqrt((pp.x-pos.x)**2 + (pp.y+1-pos.y)**2 + (pp.z-pos.z)**2);
     if (pd < radius) {
       const f = 1 - pd / radius;
-      player.takeDamage(dmg * f * f, false, pos.clone());
+      player.takeDamage(dmg * f * f, false, pos.clone(), 'your own nuke');
     }
     if (enemyManager) {
       for (const e of enemyManager.enemies) {

@@ -409,6 +409,17 @@ const SPAWN_POINTS = [
   { x: -133, z: -128 },  // house
   { x: -117, z: -128 },  // house
   { x: -105, z: -128 },  // house
+
+  // Samuel's Mansion (center 190, 120) — higher rarity expected here
+  { x:  190, z:  118 },  // grand hall
+  { x:  187, z:  120 },  // gallery
+  { x:  209, z:  120 },  // dining room
+  { x:  190, z:  137 },  // ballroom
+  { x:  209, z:  145 },  // kitchen
+  { x:  171, z:  145 },  // library
+  { x:  171, z:  164 },  // secret vault (high chance of epic/legendary)
+  { x:  171, z:  164 },  // vault second chest
+  { x:  171, z:  198 },  // secret exit bunker
 ];
 
 export class WeaponSystem {

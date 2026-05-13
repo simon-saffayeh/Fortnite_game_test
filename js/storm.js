@@ -160,7 +160,7 @@ export class Storm {
       while (this._dmgTimer >= 0.5) {
         this._dmgTimer -= 0.5;
         const dmg = this._currentDmg() * 0.5;
-        player.takeDamage(dmg, true); // true = storm damage (bypasses shield)
+        player.takeDamage(dmg, true, null, 'the storm');
       }
     } else {
       this._outsideOverlay.style.opacity = '0';

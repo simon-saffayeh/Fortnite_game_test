@@ -1,6 +1,16 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+// ── Seeded PRNG (LCG) — for reproducible tree/prop/cloud placement ───────────
+const WORLD_SEED = 42;
+function makePRNG(seed = WORLD_SEED) {
+  let s = seed >>> 0;
+  return () => {
+    s = Math.imul(s, 1664525) + 1013904223 | 0;
+    return (s >>> 0) / 0x100000000;
+  };
+}
+
 // Simple seeded noise — no external dependency needed
 function hash(n) {
   let x = Math.sin(n) * 43758.5453123;
@@ -139,6 +149,7 @@ export class World {
   }
 
   generate() {
+    this._rng = makePRNG(WORLD_SEED);
     this._buildSky();
     this._buildLights();
     this._buildTerrain();
@@ -196,32 +207,33 @@ export class World {
   }
 
   _buildClouds() {
+    const rng = this._rng;
     const cloudGeo = new THREE.SphereGeometry(1, 7, 5);
     const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.88 });
 
     for (let i = 0; i < 24; i++) {
       const group = new THREE.Group();
-      const puffs = 3 + Math.floor(Math.random() * 4);
+      const puffs = 3 + Math.floor(rng() * 4);
       for (let p = 0; p < puffs; p++) {
         const mesh = new THREE.Mesh(cloudGeo, cloudMat);
-        const sx = 30 + Math.random() * 50;
-        const sy = 14 + Math.random() * 20;
-        const sz = 20 + Math.random() * 30;
+        const sx = 30 + rng() * 50;
+        const sy = 14 + rng() * 20;
+        const sz = 20 + rng() * 30;
         mesh.scale.set(sx, sy, sz);
         mesh.position.set(
-          (Math.random() - 0.5) * sx * 2,
-          (Math.random() - 0.5) * sy * 0.5,
-          (Math.random() - 0.5) * sz
+          (rng() - 0.5) * sx * 2,
+          (rng() - 0.5) * sy * 0.5,
+          (rng() - 0.5) * sz
         );
         group.add(mesh);
       }
       group.position.set(
-        (Math.random() - 0.5) * 1200,
-        250 + Math.random() * 150,
-        (Math.random() - 0.5) * 1200
+        (rng() - 0.5) * 1200,
+        250 + rng() * 150,
+        (rng() - 0.5) * 1200
       );
       this.scene.add(group);
-      group.userData.cloudSpeed = 0.5 + Math.random() * 1.5;
+      group.userData.cloudSpeed = 0.5 + rng() * 1.5;
       this._clouds = this._clouds || [];
       this._clouds.push(group);
     }
@@ -295,6 +307,7 @@ export class World {
     }
 
     // Flatten terrain around each POI so structures sit on level ground
+    // Sort largest-radius-first so smaller zones always apply last and win any overlap conflict.
     const flatZones = [
       { x:  100, z:    0, r: 90 },   // Cedar Creek
       { x: -130, z:   50, r: 85 },   // Fort Ironwatch
@@ -302,21 +315,21 @@ export class World {
       { x:  -50, z:   80, r: 88 },   // Military Compound
       { x:  150, z:  -75, r: 100 },  // Olsen's Farm
       { x: -125, z: -120, r: 105 },  // Whalen's Town
-    ];
+      { x:  190, z:  120, r: 60  },  // Samuel's Mansion (main)
+      { x:  171, z:  195, r: 25  },  // Samuel's Mansion (secret exit)
+    ].sort((a, b) => b.r - a.r);
+    // Pre-compute target heights from the raw heightmap before any zone modifies it.
+    const rawHeightmap = this.heightmap.slice();
+    const rawGet = (x, z) => {
+      const hx = (x / S + 0.5) * (R - 1), hz = (z / S + 0.5) * (R - 1);
+      const ix = Math.floor(hx), iz = Math.floor(hz);
+      if (ix < 0 || ix >= R - 1 || iz < 0 || iz >= R - 1) return -2;
+      const fx = hx - ix, fz = hz - iz;
+      return rawHeightmap[iz*R+ix]*(1-fx)*(1-fz) + rawHeightmap[iz*R+(ix+1)]*fx*(1-fz) +
+             rawHeightmap[(iz+1)*R+ix]*(1-fx)*fz + rawHeightmap[(iz+1)*R+(ix+1)]*fx*fz;
+    };
     for (const zone of flatZones) {
-      // Use the minimum height within the tight center (5 wu radius) so
-      // structures are never buried by a high-median sample.
-      let minH = Infinity;
-      const sampleR = 5;
-      for (let i = 0; i < R; i++) {
-        for (let j = 0; j < R; j++) {
-          const wx = (j / (R - 1) - 0.5) * S;
-          const wz = (i / (R - 1) - 0.5) * S;
-          if ((wx - zone.x) ** 2 + (wz - zone.z) ** 2 < sampleR * sampleR)
-            minH = Math.min(minH, this.heightmap[i * R + j]);
-        }
-      }
-      const targetH = Math.max(1.5, isFinite(minH) ? minH : 3);
+      const targetH = Math.max(1.5, rawGet(zone.x, zone.z));
 
       // 85% of radius is fully flat, outer 15% fades cubically back to terrain
       const hardR = zone.r * 0.85;
@@ -538,27 +551,28 @@ export class World {
     const R = this.resolution;
     const S = this.size;
 
+    const rng = this._rng;
     for (let attempt = 0; attempt < 600; attempt++) {
-      const x = (Math.random() - 0.5) * S * 0.78;
-      const z = (Math.random() - 0.5) * S * 0.78;
+      const x = (rng() - 0.5) * S * 0.78;
+      const z = (rng() - 0.5) * S * 0.78;
       const h = this._getHeight(x, z);
       if (h < 0.5 || h > 24) continue;
 
       const palm = h < 3.5;
       const group = palm
-        ? this._makePalmTree(trunkMat, palmMat)
-        : this._makePineTree(trunkMat, leaf1Mat, leaf2Mat);
+        ? this._makePalmTree(trunkMat, palmMat, rng)
+        : this._makePineTree(trunkMat, leaf1Mat, leaf2Mat, rng);
 
       group.position.set(x, h, z);
-      group.rotation.y = Math.random() * Math.PI * 2;
+      group.rotation.y = rng() * Math.PI * 2;
       this.scene.add(group);
       this.trees.push(group);
     }
   }
 
-  _makePineTree(trunkMat, leaf1Mat, leaf2Mat) {
+  _makePineTree(trunkMat, leaf1Mat, leaf2Mat, rng = Math.random) {
     const g = new THREE.Group();
-    const height = 4 + Math.random() * 5;
+    const height = 4 + rng() * 5;
     const trunk = new THREE.Mesh(
       new THREE.CylinderGeometry(0.18, 0.28, height * 0.55, 7),
       trunkMat
@@ -567,7 +581,7 @@ export class World {
     trunk.castShadow = true;
     g.add(trunk);
 
-    const layers = 3 + Math.floor(Math.random() * 2);
+    const layers = 3 + Math.floor(rng() * 2);
     for (let l = 0; l < layers; l++) {
       const t = l / (layers - 1);
       const r = (0.9 - t * 0.5) * (height * 0.28);
@@ -582,9 +596,9 @@ export class World {
     return g;
   }
 
-  _makePalmTree(trunkMat, leafMat) {
+  _makePalmTree(trunkMat, leafMat, rng = Math.random) {
     const g = new THREE.Group();
-    const height = 5 + Math.random() * 4;
+    const height = 5 + rng() * 4;
 
     // Curved trunk segments
     for (let s = 0; s < 5; s++) {
@@ -593,24 +607,24 @@ export class World {
         trunkMat
       );
       seg.position.y = (s + 0.5) * (height / 5);
-      seg.rotation.x = (Math.random() - 0.5) * 0.1;
+      seg.rotation.x = (rng() - 0.5) * 0.1;
       seg.castShadow = true;
       g.add(seg);
     }
 
     // Palm fronds
-    const fronds = 6 + Math.floor(Math.random() * 4);
+    const fronds = 6 + Math.floor(rng() * 4);
     for (let f = 0; f < fronds; f++) {
       const angle = (f / fronds) * Math.PI * 2;
       const frond = new THREE.Mesh(
-        new THREE.ConeGeometry(0.15, 2.5 + Math.random(), 5),
+        new THREE.ConeGeometry(0.15, 2.5 + rng(), 5),
         leafMat
       );
       frond.position.y = height;
       frond.position.x = Math.cos(angle) * 0.3;
       frond.position.z = Math.sin(angle) * 0.3;
       frond.rotation.z = angle + Math.PI / 2;
-      frond.rotation.x = 0.5 + Math.random() * 0.4;
+      frond.rotation.x = 0.5 + rng() * 0.4;
       g.add(frond);
     }
     return g;
@@ -799,6 +813,106 @@ export class World {
       sc.addBox(cx-(hw2-dw)/2-dw/2, h, cz-hd2, (hw2-dw)/2, hh, t);
       sc.addBox(cx+(hw2-dw)/2+dw/2, h, cz-hd2, (hw2-dw)/2, hh, t);
       sc.addFloor(-125+wh.ox, h+.05, -120+wh.oz, wh.hw-.3, wh.hd-.3);
+    }
+
+    // ── Samuel's Mansion ─────────────────────────────────────────────
+    h = Math.max(0, this._getHeight(190, 120));
+    place(this._makeSamuelsMansion(), 190, 120, "Samuel's Mansion");
+
+    // --- Ground floor rooms ---
+    // Grand Entry Hall (24×18)
+    { const t=0.15,cx=190,cz=120,hw=12,hh=10,hd=9,dw=1.5;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(190, h+.05, 120, 11.8, 8.8);
+    // West Gallery (14×12, center 171,120)
+    { const t=0.15,cx=171,cz=120,hw=7,hh=8,hd=6,dw=1.1;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(171, h+.05, 120, 6.8, 5.8);
+    // East Dining (14×12, center 209,120)
+    { const t=0.15,cx=209,cz=120,hw=7,hh=8,hd=6,dw=1.1;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(209, h+.05, 120, 6.8, 5.8);
+    // Ballroom (24×16, center 190,137)
+    { const t=0.15,cx=190,cz=137,hw=12,hh=10,hd=8,dw=2.0;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(190, h+.05, 137, 11.8, 7.8);
+    // Kitchen (12×10, center 209,145)
+    { const t=0.15,cx=209,cz=145,hw=6,hh=7,hd=5,dw=1.0;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(209, h+.05, 145, 5.8, 4.8);
+    // Library (14×12, center 171,145)
+    { const t=0.15,cx=171,cz=145,hw=7,hh=8,hd=6,dw=1.1;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(171, h+.05, 145, 6.8, 5.8);
+    // --- Secret area (same floor level, dark + cramped) ---
+    // Secret Passage (4×8, center 171,155)
+    { const t=0.15,cx=171,cz=155,hw=2,hh=3.5,hd=4,dw=1.2;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(171, h+.05, 155, 1.8, 3.8);
+    // Vault (14×10, center 171,164)
+    { const t=0.15,cx=171,cz=164,hw=7,hh=4.5,hd=5,dw=1.2;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(171, h+.05, 164, 6.8, 4.8);
+    // Tunnel (3×22, center 171,177)
+    { const t=0.15,cx=171,cz=177,hw=1.5,hh=3,hd=11,dw=1.2;
+      sc.addBox(cx, h, cz+hd, hw, hh, t);
+      sc.addBox(cx-hw, h, cz, t, hh, hd);
+      sc.addBox(cx+hw, h, cz, t, hh, hd);
+      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
+    }
+    sc.addFloor(171, h+.05, 177, 1.3, 10.8);
+
+    // Secret exit shed (separate placement at exit flat zone height)
+    {
+      const hEx = Math.max(0, this._getHeight(171, 198));
+      const exitGroup = this._makeMansionExit();
+      exitGroup.position.set(171, hEx, 198);
+      this.scene.add(exitGroup);
+      this.structures.push(exitGroup);
+      // Partial ruin walls (no full enclosure — open on north side)
+      sc.addBox(171, hEx, 201.5, 3.5, 3, 0.15);   // south wall
+      sc.addBox(167.85, hEx, 198, 0.15, 3.5, 3.5); // west wall
     }
   }
 
@@ -1039,6 +1153,438 @@ export class World {
       place(hf.m2,  hf.wx - 1.5, wtY, hf.wz + 1.5, 0, 1);
       if (hf.m3) place(hf.m3, hf.wx + 1.5, wtY, hf.wz, Math.PI, 1);
     }
+
+    // ── Samuel's Mansion furniture ───────────────────────────────────────
+    const hSM  = this._getHeight(190, 120);
+    const hSMx = this._getHeight(171, 198);  // exit shed floor
+    const smY  = hSM + fl;
+    const smXY = hSMx + fl;
+
+    // Grand entry hall
+    place(sofa,    190,  smY, 118,   Math.PI,        1);
+    place(table2,  190,  smY, 121,   0,              1);
+    place(chair,   187,  smY, 121,   Math.PI * 0.5,  1);
+    place(chair2,  193,  smY, 121,   -Math.PI * 0.5, 1);
+
+    // West gallery (drawing room) — 171, h, 120
+    place(sofa2,   169,  smY, 119,   Math.PI * 0.5,  1);
+    place(sofa3,   169,  smY, 121.5, Math.PI * 0.5,  1);
+    place(table,   172,  smY, 120,   0,              1);
+
+    // East dining room — 209, h, 120
+    place(table,   209,  smY, 119,   0,              1);
+    place(table2,  209,  smY, 121.5, 0,              1);
+    place(chair,   207,  smY, 119,   Math.PI * 0.5,  1);
+    place(chair2,  211,  smY, 119,   -Math.PI * 0.5, 1);
+    place(chair,   207,  smY, 121.5, Math.PI * 0.5,  1);
+
+    // Ballroom — 190, h, 137
+    place(sofa,    185,  smY, 136,   0,              1);
+    place(sofa2,   195,  smY, 136,   0,              1);
+
+    // Kitchen — 209, h, 145
+    place(desk,    209,  smY, 144,   0,              1);
+    place(stool,   210.5,smY, 145,   0,              1);
+    place(stool,   207.5,smY, 145,   0,              1);
+
+    // Library — 171, h, 145
+    place(bookcase,178,  smY, 140.5, Math.PI,        1);
+    place(bookcase,175,  smY, 140.5, Math.PI,        1);
+    place(desk,    168,  smY, 142,   0,              1);
+    place(officeChair, 168, smY, 143.5, Math.PI,     1);
+    place(nightstand,  175, smY, 150.5, 0,           1);
+
+    // Vault — 171, h, 164
+    place(shortCloset, 178, smY, 168.5, Math.PI,     1);
+
+    // Exit bunker
+    place(stool, 171, smXY, 190, 0, 1);
+  }
+
+  // ── Samuel's Mansion ────────────────────────────────────────────────
+  _makeSamuelsMansion() {
+    const g = new THREE.Group();
+
+    const ext   = new THREE.MeshLambertMaterial({ color: 0x8e8275 }); // warm stone
+    const roofM = new THREE.MeshLambertMaterial({ color: 0x201e1c }); // dark slate
+    const winM  = new THREE.MeshLambertMaterial({ color: 0x88aabb, transparent: true, opacity: 0.5 });
+    const woodM = new THREE.MeshLambertMaterial({ color: 0x2e1a08 }); // dark walnut
+    const goldM = new THREE.MeshLambertMaterial({ color: 0xb08c28 });
+    const carpM = new THREE.MeshLambertMaterial({ color: 0x7a1010 }); // deep red carpet
+    const darkS = new THREE.MeshLambertMaterial({ color: 0x3a3730 }); // damp stone / secret
+    const crateM = new THREE.MeshLambertMaterial({ color: 0x4a3010 });
+    const ironM = new THREE.MeshLambertMaterial({ color: 0x555555 });
+    const flameM = new THREE.MeshLambertMaterial({ color: 0xff6600, emissive: new THREE.Color(0x441100) });
+    const lightWood = new THREE.MeshLambertMaterial({ color: 0x4a3418 });
+
+    const win = (x, y, z, w, h, d) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), winM);
+      m.position.set(x, y, z); m.castShadow = true; g.add(m);
+    };
+    const torch = (x, y, z) => {
+      const tb = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.5, 6), woodM);
+      tb.position.set(x, y, z); g.add(tb);
+      const fl = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), flameM);
+      fl.position.set(x, y + 0.32, z); g.add(fl);
+    };
+
+    // ── Grand Entry Hall (24w × 18d, h=10, local 0,0,0) ───────────────
+    const hall = this._hollowBox(24, 10, 18, ext, 3.0, 4.2);
+    hall.position.set(0, 0, 0); g.add(hall);
+    const carpet = new THREE.Mesh(new THREE.BoxGeometry(5, 0.05, 16), carpM);
+    carpet.position.set(0, 0.2, 0); g.add(carpet);
+    for (const cx of [-7, 7]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.32, 9.5, 8), goldM);
+      col.position.set(cx, 4.75, 0); col.castShadow = true; g.add(col);
+    }
+    const chandelier = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.07, 6, 12), goldM);
+    chandelier.rotation.x = Math.PI / 2; chandelier.position.set(0, 9.6, -1); g.add(chandelier);
+    for (let s = 0; s < 6; s++) {
+      const step = new THREE.Mesh(new THREE.BoxGeometry(5, 0.3, 0.9), woodM);
+      step.position.set(0, 0.18 + s * 0.3, 3 + s * 0.85); g.add(step);
+    }
+    for (const sx of [-2.5, 2.5]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 5), woodM);
+      rail.position.set(sx, 1.2, 5.5); g.add(rail);
+    }
+    win(-5, 5.5, -9.1, 0.1, 3, 2.2); win(5, 5.5, -9.1, 0.1, 3, 2.2);
+    for (const cz of [-3.5, 3.5]) {
+      win(-12.1, 5, cz, 2.2, 2.5, 0.1);
+      win(12.1, 5, cz, 2.2, 2.5, 0.1);
+    }
+    const hallRoof = new THREE.Mesh(new THREE.BoxGeometry(25, 0.4, 19), roofM);
+    hallRoof.position.set(0, 10.2, 0); g.add(hallRoof);
+    const hallPeak = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 14, 5, 4), roofM);
+    hallPeak.rotation.y = Math.PI / 4; hallPeak.position.set(0, 12.9, 0); g.add(hallPeak);
+    for (const cx of [-8, 8]) {
+      const chim = new THREE.Mesh(new THREE.BoxGeometry(1.2, 5, 1.2), ext);
+      chim.position.set(cx, 15, -5); g.add(chim);
+    }
+
+    // ── West Gallery (14w × 12d, h=8, local -19,0,0) ──────────────────
+    const westShell = this._hollowBox(14, 8, 12, ext, 2.2, 3.2);
+    westShell.position.set(-19, 0, 0); g.add(westShell);
+    for (let i = 0; i < 3; i++) {
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.1, 2, 1.5), woodM);
+      frame.position.set(-26.1, 4, -3 + i * 3); g.add(frame);
+      const painting = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.7, 1.2),
+        new THREE.MeshLambertMaterial({ color: [0x8b4513,0x2f4f4f,0x704214][i] }));
+      painting.position.set(-26.08, 4, -3 + i * 3); g.add(painting);
+    }
+    win(-26.1, 4.5, -2.5, 2, 2.5, 0.1); win(-26.1, 4.5, 2.5, 2, 2.5, 0.1);
+    const wRoof = new THREE.Mesh(new THREE.BoxGeometry(15, 0.4, 13), roofM);
+    wRoof.position.set(-19, 8.2, 0); g.add(wRoof);
+    const wPeak = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 8, 3, 4), roofM);
+    wPeak.rotation.y = Math.PI / 4; wPeak.position.set(-19, 9.7, 0); g.add(wPeak);
+
+    // ── East Dining Room (14w × 12d, h=8, local 19,0,0) ───────────────
+    const eastShell = this._hollowBox(14, 8, 12, ext, 2.2, 3.2);
+    eastShell.position.set(19, 0, 0); g.add(eastShell);
+    win(26.1, 4.5, -2.5, 2, 2.5, 0.1); win(26.1, 4.5, 2.5, 2, 2.5, 0.1);
+    const eRoof = new THREE.Mesh(new THREE.BoxGeometry(15, 0.4, 13), roofM);
+    eRoof.position.set(19, 8.2, 0); g.add(eRoof);
+    const ePeak = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 8, 3, 4), roofM);
+    ePeak.rotation.y = Math.PI / 4; ePeak.position.set(19, 9.7, 0); g.add(ePeak);
+
+    // ── Ballroom (24w × 16d, h=10, local 0,0,17) ──────────────────────
+    const ballShell = this._hollowBox(24, 10, 16, ext, 4.0, 4.2);
+    ballShell.position.set(0, 0, 17); g.add(ballShell);
+    for (let xi = -5; xi <= 5; xi++) for (let zi = 0; zi <= 6; zi++) {
+      const tile = new THREE.Mesh(new THREE.BoxGeometry(2, 0.06, 1.9),
+        (xi + zi) % 2 === 0 ? woodM : lightWood);
+      tile.position.set(xi * 2, 0.18, 9 + zi * 2); g.add(tile);
+    }
+    for (const [cx, cz] of [[-8,12],[8,12],[-8,22],[8,22]]) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.26, 9.5, 8), goldM);
+      col.position.set(cx, 4.75, cz); col.castShadow = true; g.add(col);
+    }
+    for (const cz of [12, 17, 22]) {
+      win(-12.1, 5.5, cz, 2.2, 3, 0.1); win(12.1, 5.5, cz, 2.2, 3, 0.1);
+    }
+    const bRoof = new THREE.Mesh(new THREE.BoxGeometry(25, 0.4, 17), roofM);
+    bRoof.position.set(0, 10.2, 17); g.add(bRoof);
+    const bPeak = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 13.5, 4, 4), roofM);
+    bPeak.rotation.y = Math.PI / 4; bPeak.position.set(0, 12.2, 17); g.add(bPeak);
+
+    // ── Kitchen (12w × 10d, h=7, local 19,0,25) ───────────────────────
+    const kitchShell = this._hollowBox(12, 7, 10, ext, 2.0, 3.0);
+    kitchShell.position.set(19, 0, 25); g.add(kitchShell);
+    const kRoof = new THREE.Mesh(new THREE.BoxGeometry(13, 0.4, 11), roofM);
+    kRoof.position.set(19, 7.2, 25); g.add(kRoof);
+
+    // ── Library (14w × 12d, h=8, local -19,0,25) — secret entrance ────
+    const libShell = this._hollowBox(14, 8, 12, ext, 2.2, 3.2);
+    libShell.position.set(-19, 0, 25); g.add(libShell);
+    for (const [bx, bz] of [[-26, 22],[-26, 25.5],[-26, 29],[-12.5, 22],[-12.5, 25.5]]) {
+      const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.3, 6, 3), woodM);
+      shelf.position.set(bx, 3, bz); g.add(shelf);
+    }
+    // The secret bookcase — darker, slightly ajar look
+    const secBC = new THREE.Mesh(new THREE.BoxGeometry(0.32, 4, 2.5),
+      new THREE.MeshLambertMaterial({ color: 0x120a02 }));
+    secBC.position.set(-26.08, 2, 29); secBC.rotation.y = 0.06; g.add(secBC);
+    const lRoof = new THREE.Mesh(new THREE.BoxGeometry(15, 0.4, 13), roofM);
+    lRoof.position.set(-19, 8.2, 25); g.add(lRoof);
+    const lPeak = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 8, 3, 4), roofM);
+    lPeak.rotation.y = Math.PI / 4; lPeak.position.set(-19, 9.5, 25); g.add(lPeak);
+
+    // ── Secret Passage (4w × 8d, h=3.5, local -19,0,35) ──────────────
+    const passShell = this._hollowBox(4, 3.5, 8, darkS, 2.0, 3.2);
+    passShell.position.set(-19, 0, 35); g.add(passShell);
+    torch(-21, 2.4, 33); torch(-17, 2.4, 38);
+
+    // ── Vault Room (14w × 10d, h=4.5, local -19,0,44) ─────────────────
+    const vaultShell = this._hollowBox(14, 4.5, 10, darkS, 2.2, 3.2);
+    vaultShell.position.set(-19, 0, 44); g.add(vaultShell);
+    const safe = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.6, 0.8),
+      new THREE.MeshLambertMaterial({ color: 0x2a3a4a }));
+    safe.position.set(-24, 0.8, 49); g.add(safe);
+    for (const bx of [-18, -17, -16]) {
+      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 4, 6), ironM);
+      bar.position.set(bx, 2, 39.2); g.add(bar);
+    }
+    for (const [cx, cz] of [[-25, 41],[-13, 41],[-24, 47]]) {
+      const cr = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 1.5), crateM);
+      cr.position.set(cx, 0.75, cz); cr.castShadow = true; g.add(cr);
+    }
+    torch(-25, 3.5, 40); torch(-13, 3.5, 48); torch(-25, 3.5, 48);
+
+    // ── Tunnel (3w × 22d, h=3, local -19,0,57) ────────────────────────
+    const tunnelShell = this._hollowBox(3, 3, 22, darkS, 2.0, 2.8);
+    tunnelShell.position.set(-19, 0, 57); g.add(tunnelShell);
+    for (const tz of [48, 52, 56, 60, 64]) {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.2, 0.22), woodM);
+      beam.position.set(-19, 2.9, tz); g.add(beam);
+    }
+    torch(-20.4, 1.8, 51); torch(-20.4, 1.8, 62);
+
+    return g;
+  }
+
+  _makeMansionExit() {
+    const g = new THREE.Group();
+    const ruinM = new THREE.MeshLambertMaterial({ color: 0x6a5f4e });
+    const mossM = new THREE.MeshLambertMaterial({ color: 0x3d5c2a });
+    const darkS = new THREE.MeshLambertMaterial({ color: 0x3a3730 });
+    const woodM = new THREE.MeshLambertMaterial({ color: 0x2e1a08 });
+
+    // Exit bunker (8w × 8d, h=3.5) — underground side, entered from tunnel
+    const bunker = this._hollowBox(8, 3.5, 8, darkS, 2.2, 3.0);
+    bunker.position.set(0, 0, -8); g.add(bunker);
+    // Ladder rungs on north wall of bunker
+    for (let r = 0; r < 5; r++) {
+      const rung = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.2, 5), woodM);
+      rung.rotation.z = Math.PI / 2; rung.position.set(0, 0.35 + r * 0.65, -12.1); g.add(rung);
+    }
+
+    // Ruined stone outbuilding on surface (no roof, partial walls)
+    const sw = new THREE.Mesh(new THREE.BoxGeometry(7.5, 3.2, 0.4), ruinM);
+    sw.position.set(0, 1.6, 4.8); g.add(sw);              // south wall
+    const ww = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.8, 10), ruinM);
+    ww.position.set(-4.0, 1.9, 0); g.add(ww);             // west wall (full)
+    const ewTop = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.8, 6), ruinM);
+    ewTop.position.set(4.0, 2.9, -1); g.add(ewTop);       // east wall (crumbled)
+
+    // Rubble chunks
+    for (const [dx, dz, dry, sc] of [
+      [-2, 3, 0.3, 0.8], [1.5, 4.2, 1.1, 0.6],
+      [3, -4, 0.7, 0.9], [-1, -1, 1.5, 0.7],
+    ]) {
+      const chunk = new THREE.Mesh(new THREE.BoxGeometry(sc, sc * 0.5, sc * 0.7), ruinM);
+      chunk.position.set(dx, sc * 0.25, dz); chunk.rotation.y = dry; g.add(chunk);
+    }
+    // Moss patches
+    for (const [dx, dz] of [[-3.5, 2], [0, 4.5], [3, 1], [-1.5, -3]]) {
+      const moss = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.08, 1.0), mossM);
+      moss.position.set(dx, 0.08, dz); g.add(moss);
+    }
+    // Trapdoor visual in the floor of the ruin
+    const trap = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.1, 1.8), woodM);
+    trap.position.set(0, 0.12, -2); g.add(trap);
+    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.08, 0.12), woodM);
+    handle.position.set(0, 0.18, -2); g.add(handle);
+
+    return g;
+  }
+
+  // ── Nature GLB loader ───────────────────────────────────────────────
+  async loadNature() {
+    const loader = new GLTFLoader();
+    const load = path => new Promise((res, rej) =>
+      loader.load(path, g => res(g.scene), null, rej));
+
+    const floorOffset = model => {
+      const box = new THREE.Box3().setFromObject(model);
+      return -box.min.y;
+    };
+
+    // Place a nature model at world ground level; scale defaults to 1
+    const placeNature = (model, wx, wz, rotY = 0, scale = 1) => {
+      const obj = model.clone(true);
+      obj.scale.setScalar(scale);
+      obj.rotation.y = rotY;
+      const wy = this._getHeight(wx, wz);
+      if (wy < 0) return;
+      const offset = floorOffset(obj);
+      obj.position.set(wx, wy + offset, wz);
+      obj.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
+      this.scene.add(obj);
+    };
+
+    // Load the subset of models we'll use
+    let pine, pine2, pine3, tree, twistedTree, bush, bushFlowers,
+        fern, tallGrass, flowerGroup, mushroom, rockMed, plant, plantBig;
+    try {
+      [pine, pine2, pine3, tree, twistedTree, bush, bushFlowers,
+       fern, tallGrass, flowerGroup, mushroom, rockMed, plant, plantBig] =
+        await Promise.all([
+          load('objects/nature/Pine.glb'),
+          load('objects/nature/Pine-699sFuLCN2.glb'),
+          load('objects/nature/Pine-79gmlLnweB.glb'),
+          load('objects/nature/Tree.glb'),
+          load('objects/nature/Twisted Tree.glb'),
+          load('objects/nature/Bush.glb'),
+          load('objects/nature/Bush with Flowers.glb'),
+          load('objects/nature/Fern.glb'),
+          load('objects/nature/Tall Grass.glb'),
+          load('objects/nature/Flower Group.glb'),
+          load('objects/nature/Mushroom.glb'),
+          load('objects/nature/Rock Medium.glb'),
+          load('objects/nature/Plant.glb'),
+          load('objects/nature/Plant Big-MbhbP7JrTI.glb'),
+        ]);
+    } catch (e) {
+      console.warn('[nature] Some models failed to load:', e);
+      return;
+    }
+
+    const hOF = this._getHeight(150, -75);   // Olsen's Farm ground Y
+    const PI  = Math.PI;
+
+    // ── Olsen's Farm — nature dressing ──────────────────────────────────────
+    // Trees around the farm perimeter
+    const farmTrees = [
+      // North fence line
+      { x: 138, z: -90, m: pine,        r: 0,        s: 1.2 },
+      { x: 142, z: -92, m: pine2,       r: PI*0.3,   s: 1.0 },
+      { x: 146, z: -91, m: tree,        r: PI*0.7,   s: 1.1 },
+      { x: 162, z: -90, m: pine3,       r: PI*0.5,   s: 1.3 },
+      { x: 168, z: -92, m: pine,        r: PI*1.2,   s: 0.9 },
+      { x: 174, z: -90, m: pine2,       r: PI*0.8,   s: 1.1 },
+      { x: 180, z: -91, m: tree,        r: PI*0.2,   s: 1.0 },
+      // South side
+      { x: 140, z: -60, m: twistedTree, r: 0,        s: 1.0 },
+      { x: 155, z: -58, m: pine,        r: PI*0.6,   s: 1.2 },
+      { x: 168, z: -60, m: tree,        r: PI*1.1,   s: 1.1 },
+      // West side
+      { x: 124, z: -80, m: twistedTree, r: PI*0.4,   s: 0.9 },
+      { x: 122, z: -70, m: pine3,       r: PI*0.9,   s: 1.0 },
+      // East side
+      { x: 182, z: -80, m: pine2,       r: PI*1.3,   s: 1.2 },
+      { x: 183, z: -70, m: pine,        r: 0,        s: 1.0 },
+    ];
+    for (const t of farmTrees) placeNature(t.m, t.x, t.z, t.r, t.s);
+
+    // Ground cover: bushes, ferns, flowers around paths and borders
+    const farmGroundCover = [
+      // Along barn approaches
+      { x: 143, z: -76, m: bushFlowers, r: 0,       s: 1 },
+      { x: 144, z: -72, m: fern,        r: PI*0.5,  s: 1 },
+      { x: 156, z: -69, m: bush,        r: PI*0.3,  s: 1 },
+      { x: 157, z: -72, m: flowerGroup, r: 0,       s: 1 },
+      { x: 160, z: -68, m: fern,        r: PI*0.8,  s: 1 },
+      // Around farmhouse
+      { x: 142, z: -80, m: bushFlowers, r: PI*0.2,  s: 1 },
+      { x: 142, z: -74, m: fern,        r: PI*1.0,  s: 1 },
+      { x: 158, z: -80, m: bush,        r: PI*0.6,  s: 1 },
+      { x: 158, z: -74, m: flowerGroup, r: PI*0.4,  s: 1 },
+      // Near barn 1 (170, -77)
+      { x: 162, z: -82, m: fern,        r: 0,       s: 1 },
+      { x: 178, z: -82, m: bush,        r: PI*1.1,  s: 1 },
+      { x: 178, z: -72, m: bushFlowers, r: PI*0.7,  s: 1 },
+      { x: 162, z: -72, m: flowerGroup, r: PI*0.3,  s: 1 },
+      // Near barn 2 (133, -75)
+      { x: 126, z: -80, m: fern,        r: PI*0.5,  s: 1 },
+      { x: 126, z: -70, m: bush,        r: PI*0.9,  s: 1 },
+      { x: 139, z: -68, m: flowerGroup, r: 0,       s: 1 },
+      { x: 140, z: -82, m: fern,        r: PI*1.3,  s: 1 },
+      // Scattered mushrooms
+      { x: 148, z: -88, m: mushroom,    r: 0,       s: 1.2 },
+      { x: 166, z: -86, m: mushroom,    r: PI*0.6,  s: 1.0 },
+      { x: 128, z: -76, m: mushroom,    r: PI*1.2,  s: 0.9 },
+      // Tall grass tufts near fence
+      { x: 150, z: -88, m: tallGrass,   r: 0,       s: 1 },
+      { x: 164, z: -89, m: tallGrass,   r: PI*0.4,  s: 1 },
+      { x: 136, z: -87, m: tallGrass,   r: PI*0.9,  s: 1 },
+      { x: 176, z: -88, m: tallGrass,   r: PI*1.5,  s: 1 },
+      // Plants by farmhouse walls
+      { x: 143, z: -79, m: plant,       r: 0,       s: 1 },
+      { x: 157, z: -79, m: plantBig,    r: PI,      s: 1 },
+      { x: 150, z: -70, m: plant,       r: PI*0.5,  s: 1 },
+      // Rocks
+      { x: 135, z: -83, m: rockMed,     r: PI*0.3,  s: 1 },
+      { x: 175, z: -83, m: rockMed,     r: PI*1.0,  s: 1.2 },
+      { x: 152, z: -86, m: rockMed,     r: PI*0.7,  s: 0.8 },
+    ];
+    for (const gc of farmGroundCover) placeNature(gc.m, gc.x, gc.z, gc.r, gc.s);
+
+    // ── GLB trees scattered across the map ───────────────────────────────────
+    // Strategic clusters to enrich the island without overwhelming the POIs.
+    // Uses a fixed list so placement is deterministic (no Math.random).
+    const mapTrees = [
+      // North-west forest
+      { x: -60,  z: -30,  m: pine,        r: 0,        s: 1.1 },
+      { x: -55,  z: -22,  m: pine2,       r: PI*0.7,   s: 1.2 },
+      { x: -65,  z: -18,  m: tree,        r: PI*0.3,   s: 1.0 },
+      { x: -72,  z: -28,  m: twistedTree, r: PI*1.1,   s: 1.0 },
+      { x: -62,  z: -40,  m: pine3,       r: PI*0.5,   s: 1.3 },
+      { x: -50,  z: -35,  m: pine,        r: PI*0.9,   s: 1.1 },
+      { x: -78,  z: -14,  m: tree,        r: PI*1.4,   s: 1.0 },
+      // Between Cedar Creek and Ancient Temple
+      { x:  58,  z: -55,  m: pine,        r: PI*0.2,   s: 1.0 },
+      { x:  65,  z: -65,  m: pine2,       r: PI*0.8,   s: 1.1 },
+      { x:  50,  z: -75,  m: twistedTree, r: PI*1.2,   s: 0.9 },
+      { x:  72,  z: -80,  m: pine3,       r: 0,        s: 1.2 },
+      { x:  45,  z: -50,  m: tree,        r: PI*0.6,   s: 1.0 },
+      // South-east coastline
+      { x: 100,  z: -110, m: pine,        r: PI*0.3,   s: 1.1 },
+      { x: 110,  z: -120, m: pine2,       r: PI*1.0,   s: 1.0 },
+      { x:  90,  z: -125, m: twistedTree, r: PI*0.5,   s: 0.9 },
+      { x: 120,  z: -105, m: tree,        r: PI*1.3,   s: 1.2 },
+      // East ridge near Olsen's Farm approach
+      { x: 120,  z: -45,  m: pine,        r: 0,        s: 1.0 },
+      { x: 128,  z: -52,  m: pine3,       r: PI*0.6,   s: 1.1 },
+      { x: 118,  z: -58,  m: tree,        r: PI*1.1,   s: 1.0 },
+      // Near Military Compound (avoid buildings, stay outside)
+      { x: -22,  z:  72,  m: pine,        r: PI*0.4,   s: 1.0 },
+      { x: -18,  z:  82,  m: pine2,       r: PI*0.9,   s: 1.1 },
+      { x: -30,  z:  95,  m: twistedTree, r: PI*0.2,   s: 0.9 },
+      { x: -38,  z: 100,  m: pine3,       r: PI*1.0,   s: 1.0 },
+      // Fort Ironwatch surroundings
+      { x: -100, z:  28,  m: pine,        r: 0,        s: 1.2 },
+      { x: -108, z:  35,  m: tree,        r: PI*0.7,   s: 1.0 },
+      { x: -96,  z:  42,  m: pine2,       r: PI*1.3,   s: 1.1 },
+      { x: -108, z:  68,  m: twistedTree, r: PI*0.4,   s: 1.0 },
+      { x: -100, z:  75,  m: pine3,       r: PI*0.8,   s: 1.2 },
+      // Whalen's Town approach
+      { x: -100, z: -105, m: pine,        r: PI*1.0,   s: 1.0 },
+      { x: -95,  z: -115, m: pine2,       r: PI*0.3,   s: 1.1 },
+      { x: -102, z: -128, m: tree,        r: PI*0.6,   s: 1.0 },
+      { x: -148, z: -100, m: twistedTree, r: PI*1.2,   s: 0.9 },
+      { x: -152, z: -110, m: pine3,       r: PI*0.1,   s: 1.1 },
+      // Central area sparse trees
+      { x:  20,  z:  35,  m: pine,        r: 0,        s: 1.0 },
+      { x:  28,  z:  28,  m: pine2,       r: PI*0.5,   s: 1.1 },
+      { x:  12,  z:  45,  m: tree,        r: PI*1.0,   s: 1.0 },
+      { x: -15,  z:  20,  m: twistedTree, r: PI*0.4,   s: 0.9 },
+      { x:  35,  z:  18,  m: pine3,       r: PI*1.3,   s: 1.0 },
+      // Ancient Temple surroundings
+      { x:  15,  z: -140, m: twistedTree, r: PI*0.8,   s: 1.0 },
+      { x:  55,  z: -148, m: pine,        r: PI*0.2,   s: 1.1 },
+      { x:  60,  z: -162, m: pine2,       r: PI*1.0,   s: 1.0 },
+      { x:  12,  z: -172, m: twistedTree, r: PI*0.6,   s: 0.9 },
+    ];
+    for (const t of mapTrees) placeNature(t.m, t.x, t.z, t.r, t.s);
   }
 
   _makeCedarCreek() {
@@ -1848,22 +2394,23 @@ export class World {
     const rockMat = new THREE.MeshLambertMaterial({ color: 0x888880 });
     const S = this.size;
 
+    const rng = this._rng;
     for (let i = 0; i < 120; i++) {
-      const x = (Math.random() - 0.5) * S * 0.75;
-      const z = (Math.random() - 0.5) * S * 0.75;
+      const x = (rng() - 0.5) * S * 0.75;
+      const z = (rng() - 0.5) * S * 0.75;
       const h = this._getHeight(x, z);
       if (h < 0.2) continue;
 
-      const r = 0.3 + Math.random() * 1.4;
+      const r = 0.3 + rng() * 1.4;
       const rock = new THREE.Mesh(
         new THREE.DodecahedronGeometry(r, 0),
         rockMat
       );
       rock.position.set(x, h + r * 0.5, z);
       rock.rotation.set(
-        Math.random() * Math.PI,
-        Math.random() * Math.PI,
-        Math.random() * Math.PI
+        rng() * Math.PI,
+        rng() * Math.PI,
+        rng() * Math.PI
       );
       rock.castShadow = true;
       this.scene.add(rock);
@@ -1913,7 +2460,7 @@ export class World {
   getSpawnPosition() {
     // Random spawn anywhere on the playable island, above water, below peaks
     for (let attempt = 0; attempt < 400; attempt++) {
-      const a = Math.random() * Math.PI * 2;
+      const a = Math.random() * Math.PI * 2;   // intentionally unseeded — different each match
       const r = 40 + Math.random() * 170;
       const x = Math.cos(a) * r;
       const z = Math.sin(a) * r;

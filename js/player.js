@@ -160,7 +160,7 @@ export class Player {
   }
 
   // ── Damage / Health ──────────────────────────────────────────────────────
-  takeDamage(amount, stormDamage = false, sourcePos = null) {
+  takeDamage(amount, stormDamage = false, sourcePos = null, killerLabel = null) {
     if (this.dead) return;
     let remaining = amount;
     if (!stormDamage && this.shield > 0) {
@@ -169,6 +169,7 @@ export class Player {
       remaining     -= absorbed;
     }
     this.health = Math.max(0, this.health - remaining);
+    if (killerLabel) this._lastKillerLabel = killerLabel;
     if (this.onDamage) this.onDamage(amount, sourcePos);
     if (this.health <= 0 && !this.dead) this._die();
   }
@@ -179,7 +180,7 @@ export class Player {
 
   _die() {
     this.dead = true;
-    if (this.onDeath) this.onDeath();
+    if (this.onDeath) this.onDeath(this._lastKillerLabel ?? null);
   }
 
   // ── Input ────────────────────────────────────────────────────────────────
