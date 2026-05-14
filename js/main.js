@@ -354,7 +354,7 @@ class Game {
 
     // ── Starting weapon ───────────────────────────────────────────────
     if (this.testingEnabled) {
-      for (const id of ['phaseRifle', 'sniper', 'rocketLauncher', 'thunderLance', 'minigun', 'bombLauncher']) {
+      for (const id of ['phaseRifle', 'sniper', 'rocketLauncher', 'minigun', 'bombLauncher']) {
         this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS[id]));
       }
       this.player._sprintMultiplier = 2.0;
@@ -535,6 +535,11 @@ class Game {
         }
       };
     }
+
+    this.projectiles.onExplosion = (pos, soundId) => {
+      const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+      this.audio?.playAt(soundId, pos, this.player.getPosition(), right);
+    };
 
     this.projectiles.onEnemyHit = (pos, damage, _enemy, justKilled, headshot) => {
       const numPos = pos.clone().add(new THREE.Vector3(0, 0.8, 0));

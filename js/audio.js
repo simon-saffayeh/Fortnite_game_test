@@ -7,15 +7,18 @@
 
 const SOUND_FILES = {
   // Semi-auto
-  pistol:     'sounds/semi_auto_shots/pistol_shot.wav',
-  shotgun:    'sounds/semi_auto_shots/shotgun_shot.wav',
-  handCannon: 'sounds/semi_auto_shots/hand_cannon_shot.wav',
-  sniper:     'sounds/semi_auto_shots/sniper_shot.wav',
+  pistol:          'sounds/semi_auto_shots/pistol_shot.wav',
+  shotgun:         'sounds/semi_auto_shots/shotgun_shot.wav',
+  handCannon:      'sounds/semi_auto_shots/hand_cannon_shot.wav',
+  sniper:          'sounds/semi_auto_shots/sniper_shot.wav',
+  rocketLauncher:  'sounds/semi_auto_shots/rocket_launcher_shot.wav',
+  // Nuke plays on landing, not on fire — keyed separately from bombLauncher
+  nukeExplosion:   'sounds/semi_auto_shots/nuke_launcher.wav',
   // Full-auto — same per-shot path, fired once per bullet
-  ar:         'sounds/full_auto_sounds/assault_rifle_shot.wav',
-  heavyAR:    'sounds/full_auto_sounds/assault_rifle_shot.wav',
-  smg:        'sounds/full_auto_sounds/assault_rifle_shot.wav',
-  minigun:    'sounds/full_auto_sounds/assault_rifle_shot.wav',
+  ar:              'sounds/full_auto_sounds/assault_rifle_shot.wav',
+  heavyAR:         'sounds/full_auto_sounds/assault_rifle_shot.wav',
+  smg:             'sounds/full_auto_sounds/smg_shot.wav',
+  minigun:         'sounds/full_auto_sounds/smg_shot.wav',
 };
 
 // Per-shot playback-rate variation (±) — keeps rapid fire from sounding robotic
