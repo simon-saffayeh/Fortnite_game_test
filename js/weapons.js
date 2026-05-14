@@ -553,16 +553,28 @@ const SPAWN_POINTS = [
   { x: -117, z: -128 },  // house
   { x: -105, z: -128 },  // house
 
-  // Samuel's Mansion (center 190, 120) — higher rarity expected here
-  { x:  190, z:  118 },  // grand hall
-  { x:  187, z:  120 },  // gallery
-  { x:  209, z:  120 },  // dining room
-  { x:  190, z:  137 },  // ballroom
-  { x:  209, z:  145 },  // kitchen
-  { x:  171, z:  145 },  // library
-  { x:  171, z:  164 },  // secret vault (high chance of epic/legendary)
-  { x:  171, z:  164 },  // vault second chest
-  { x:  171, z:  198 },  // secret exit bunker
+  // Samuel's Mansion (center 190, 120) — three-level mansion.
+  // dy is the y-offset above terrain: 0 = basement floor, 5 = ground floor, 10 = upper floor.
+  // Ground floor
+  { x:  190, z:  110, dy: 5 },  // foyer
+  { x:  178, z:  113, dy: 5 },  // drawing room
+  { x:  202, z:  114, dy: 5 },  // dining room
+  { x:  190, z:  125, dy: 5 },  // great hall
+  { x:  178, z:  127, dy: 5 },  // library
+  { x:  204, z:  131, dy: 5 },  // kitchen
+  // Upper floor
+  { x:  181, z:  110, dy: 10 }, // SW bedroom
+  { x:  199, z:  115, dy: 10 }, // SE bedroom
+  { x:  185, z:  130, dy: 10 }, // master bedroom
+  { x:  202, z:  130, dy: 10 }, // NE bedroom
+  // Basement (loot vault feel)
+  { x:  186, z:  109, dy: 0 },  // basement west
+  { x:  202, z:  130, dy: 0 },  // basement workbench
+  { x:  178, z:  111, dy: 0 },  // basement storage
+  // Tunnel + surface exit
+  { x:  190, z:  155, dy: 0 },  // tunnel north run (mid)
+  { x:  175, z:  190, dy: 0 },  // tunnel west run
+  { x:  171, z:  195, dy: 0 },  // secret exit ruin
 ];
 
 export class WeaponSystem {
@@ -579,7 +591,8 @@ export class WeaponSystem {
       const h = this.world.getTerrainHeight(s.x, s.z);
       if (h < 0.2) continue;
       const def = randomWeaponDef();
-      this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, h, s.z)));
+      const y = h + (s.dy ?? 0);
+      this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, y, s.z)));
     }
   }
 

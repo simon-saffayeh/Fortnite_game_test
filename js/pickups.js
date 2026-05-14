@@ -146,10 +146,10 @@ const SPAWN_LIST = [
   { id: 'bigmed',    x: -125, z: -145  },
   { id: 'shield',    x: -118, z:  -98  },
   { id: 'medkit',    x:  -99, z: -121  },
-  // Samuel's Mansion — stimpack in vault, bigshield in library
-  { id: 'stimpack',  x:  171, z:  164  },
-  { id: 'bigshield', x:  171, z:  145  },
-  { id: 'bigmed',    x:  190, z:  120  },
+  // Samuel's Mansion — basement storage, library, master bedroom
+  { id: 'stimpack',  x:  180, z:  111, dy: 0 },  // basement storage
+  { id: 'bigshield', x:  178, z:  128, dy: 5 },  // library
+  { id: 'bigmed',    x:  182, z:  125, dy: 10 }, // master bedroom
 ];
 
 export class PickupManager {
@@ -166,7 +166,8 @@ export class PickupManager {
       const h = this.world.getTerrainHeight(s.x, s.z);
       if (h < 0.2) continue;
       const def = DEFS[s.id];
-      this.pickups.push(new HealthPickup(this.scene, def, new THREE.Vector3(s.x, h, s.z)));
+      const y = h + (s.dy ?? 0);
+      this.pickups.push(new HealthPickup(this.scene, def, new THREE.Vector3(s.x, y, s.z)));
     }
   }
 

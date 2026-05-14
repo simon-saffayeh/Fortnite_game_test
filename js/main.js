@@ -359,13 +359,17 @@ class Game {
 
     // ── Prewarm gun model cache + explosion particle materials + shaders ──
     // Building each gun model once at startup populates the cache so future
-    // pickups clone instead of re-allocating geometry/materials; doing it now
-    // (before the first render) folds the shader compile into the load screen
-    // instead of stuttering the first time the player swaps weapons.
+    // pickups clone instead of re-allocating geometry/materials. The held-scale
+    // clones must also be present in the scene when renderer.compile() runs so
+    // their shader programs compile during boot instead of stuttering the first
+    // time the player picks up that weapon type.
+    const _prewarmGroup = new THREE.Group();
+    _prewarmGroup.visible = false;
     for (const id of Object.keys(WEAPON_DEFS)) {
-      buildGunModel(WEAPON_DEFS[id], 0.58);
+      _prewarmGroup.add(buildGunModel(WEAPON_DEFS[id], 0.58));
       buildGunModel(WEAPON_DEFS[id], 1.15);
     }
+    this.scene.add(_prewarmGroup);
     // Prewarm common burst-particle materials (nuke, normal explosion, hit fx)
     const _warmColors = [
       [0xffffff, 0.9], [0xff7700, 0.65], [0xff3300, 0.55], [0xffdd00, 0.45],
@@ -376,8 +380,45 @@ class Game {
       [0xff1111, 0.2],
     ];
     for (const [c, s] of _warmColors) this.particles._getBurstMaterial(c, s);
-    // Force shader compile for everything currently in scene
+
+    // Stage explosion mesh-FX into the scene so their MeshBasicMaterial shaders
+    // (incl. DoubleSide and transparent variants) compile during boot.
+    const _fxMat = (side = THREE.FrontSide) => new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 1, depthWrite: false, side,
+    });
+    const _fxGeos = [
+      new THREE.SphereGeometry(1, 14, 10),
+      new THREE.TorusGeometry(1, 0.55, 6, 48),
+      new THREE.TorusGeometry(1, 0.7, 8, 32),
+      new THREE.CylinderGeometry(1, 1, 1, 12),
+    ];
+    const _fxMeshes = [];
+    for (const geo of _fxGeos) {
+      const mFront = new THREE.Mesh(geo, _fxMat(THREE.FrontSide));
+      const mDouble = new THREE.Mesh(geo, _fxMat(THREE.DoubleSide));
+      mFront.position.set(0, -9999, 0);
+      mDouble.position.set(0, -9999, 0);
+      this.scene.add(mFront); this.scene.add(mDouble);
+      _fxMeshes.push(mFront, mDouble);
+    }
+
+    // Compile twice: once with the current N-light state (matches normal play),
+    // then again with an extra PointLight present so lit materials also have a
+    // compiled program for the N+1-light state a nuclear explosion produces.
+    // Otherwise the first explosion stalls every lit material's shader compile.
     this.renderer.compile(this.scene, this.camera);
+    const _prewarmLight = new THREE.PointLight(0xff8822, 0.0001, 1);
+    _prewarmLight.position.set(0, -9999, 0);
+    this.scene.add(_prewarmLight);
+    this.renderer.compile(this.scene, this.camera);
+    this.scene.remove(_prewarmLight);
+
+    this.scene.remove(_prewarmGroup);
+    for (const m of _fxMeshes) {
+      this.scene.remove(m);
+      m.material.dispose();
+    }
+    for (const g of _fxGeos) g.dispose();
 
     // ── Wire callbacks ────────────────────────────────────────────────
     this._totalEnemies = this.enemies?.enemies.length ?? 0;
