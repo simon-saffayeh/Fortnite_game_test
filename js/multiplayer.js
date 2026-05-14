@@ -201,7 +201,7 @@ export class NetworkManager {
   setReady(ready)        { this.send({ type: 'ready', value: ready }); }
   startGame()            { this.send({ type: 'startGame' }); }
   sendState(pos, yaw)    { this.send({ type: 'state', pos: [pos.x, pos.y, pos.z], yaw }); }
-  sendShoot(orig, dir)   { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z] }); }
+  sendShoot(orig, dir, weapon) { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z], weapon }); }
   sendHit(targetId, dmg) { this.send({ type: 'hit', targetId, damage: dmg }); }
   sendDeath()            { this.send({ type: 'death' }); }
   sendBuild(pieceType, x, y, z, rotY) { this.send({ type: 'build', pieceType, x, y, z, rotY }); }

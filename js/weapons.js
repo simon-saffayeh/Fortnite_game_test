@@ -39,19 +39,6 @@ export const WEAPON_DEFS = {
     spread: 0.058, magSize: 100, reloadTime: 5.0,
     rarityColor: 0xff1111, rarity: 'Mythic', auto: true, pellets: 1,
   },
-  revolver: {
-    id: 'revolver', name: 'Revolver',
-    damage: 55, fireRate: 0.55, bulletSpeed: 280, range: 200,
-    spread: 0.012, magSize: 6, reloadTime: 1.8,
-    rarityColor: 0x888888, rarity: 'Common', auto: false, pellets: 1,
-  },
-  burstRifle: {
-    id: 'burstRifle', name: 'Burst Rifle',
-    damage: 28, fireRate: 0.10, bulletSpeed: 440, range: 280,
-    spread: 0.020, magSize: 30, reloadTime: 2.1,
-    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
-    burstCount: 3, burstDelay: 0.08,
-  },
   heavyAR: {
     id: 'heavyAR', name: 'Heavy AR',
     damage: 42, fireRate: 0.18, bulletSpeed: 400, range: 320,
@@ -84,7 +71,7 @@ export const WEAPON_DEFS = {
     id: 'handCannon', name: 'Hand Cannon',
     damage: 68, fireRate: 0.70, bulletSpeed: 320, range: 230,
     spread: 0.010, magSize: 7, reloadTime: 1.9,
-    rarityColor: 0x888888, rarity: 'Common', auto: false, pellets: 1,
+    rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
   crossbow: {
     id: 'crossbow', name: 'Crossbow',
@@ -93,12 +80,6 @@ export const WEAPON_DEFS = {
     rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
     silent: true,
   },
-  scoutRifle: {
-    id: 'scoutRifle', name: 'Scout Rifle',
-    damage: 64, fireRate: 0.40, bulletSpeed: 470, range: 390,
-    spread: 0.011, magSize: 10, reloadTime: 2.1,
-    rarityColor: 0x0088ff, rarity: 'Rare', auto: false, pellets: 1,
-  },
   huntingRifle: {
     id: 'huntingRifle', name: 'Hunting Rifle',
     damage: 108, fireRate: 1.05, bulletSpeed: 490, range: 430,
@@ -106,16 +87,6 @@ export const WEAPON_DEFS = {
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
   // ── Unique weapons ───────────────────────────────────────────────────────────
-  // Thunder Lance: slow electric orb — on explosion chains FULL damage to every enemy
-  // within chainRadius (no falloff for chained targets). Wipe groups instantly.
-  thunderLance: {
-    id: 'thunderLance', name: 'Thunder Lance',
-    damage: 80, fireRate: 1.5, bulletSpeed: 52, range: 360,
-    spread: 0.003, magSize: 6, reloadTime: 3.2,
-    rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
-    explosive: true, explosionRadius: 5, explosionDamage: 80,
-    chainExplosion: true, chainRadius: 15, chainDamage: 60,
-  },
   // Phase Rifle: bullet travels slowly — when it hits anything the player
   // instantly teleports to that location. Fire into a window, teleport inside.
   phaseRifle: {
@@ -223,21 +194,6 @@ function _buildGunModelRaw(def, scale = 1) {
     g.add(box(0.10, 0.26, 0.13, 0x1a1410, 0, -0.20, 0.24));
     g.add(box(0.04, 0.08, 0.16, 0x111111, 0, -0.10, 0.12));
 
-  } else if (def.id === 'revolver') {
-    g.add(box(0.11, 0.17, 0.55, 0x3a3a3a, 0, 0, 0));
-    g.add(box(0.06, 0.06, 0.35, 0x111111, 0, 0.06, -0.38));
-    g.add(cyl(0.07, 0.12, 0x555555, 0, 0, -0.05, Math.PI/2)); // cylinder
-    g.add(box(0.10, 0.22, 0.14, 0x2a2a2a, 0, -0.16, 0.16));
-    g.add(box(0.04, 0.08, 0.13, 0x111111, 0, -0.08, 0.06));
-
-  } else if (def.id === 'burstRifle') {
-    g.add(box(0.10, 0.15, 0.82, 0x3a4a2a, 0, 0, 0));
-    g.add(box(0.04, 0.04, 0.30, 0x111111, 0, 0.04, -0.55));
-    g.add(box(0.08, 0.10, 0.25, 0x2a3a1a, 0, -0.02, 0.50));
-    g.add(box(0.07, 0.22, 0.11, def.rarityColor, 0, -0.17, 0.10));
-    g.add(box(0.08, 0.17, 0.11, 0x222222, 0, -0.15, 0.28));
-    g.add(box(0.04, 0.03, 0.48, 0x444444, 0, 0.10, 0.02));
-
   } else if (def.id === 'heavyAR') {
     g.add(box(0.13, 0.19, 1.05, 0x1a2a1a, 0, 0, 0));
     g.add(box(0.06, 0.06, 0.42, 0x111111, 0, 0.05, -0.72));
@@ -282,18 +238,6 @@ function _buildGunModelRaw(def, scale = 1) {
     g.add(box(0.04, 0.07, 0.14, 0x111111, 0, -0.07, 0.14));     // trigger
     g.add(box(0.03, 0.03, 0.22, 0xccaa55, 0, 0.08, -0.16));     // bolt (arrow) on rail
 
-  } else if (def.id === 'scoutRifle') {
-    // DMR — long barrel, scope, bipod legs
-    g.add(box(0.11, 0.16, 1.00, 0x3a3a4a, 0, 0, 0));            // body
-    g.add(box(0.04, 0.04, 0.50, 0x111111, 0, 0.05, -0.72));     // barrel
-    g.add(box(0.09, 0.10, 0.32, 0x2a2a3a, 0, -0.02, 0.60));     // stock
-    g.add(box(0.08, 0.22, 0.12, def.rarityColor, 0, -0.18, 0.10)); // mag
-    g.add(box(0.09, 0.18, 0.12, 0x222222, 0, -0.15, 0.30));     // grip
-    g.add(cyl(0.038, 0.38, def.rarityColor, 0, 0.14, -0.08, Math.PI/2)); // scope tube
-    // Bipod legs
-    g.add(box(0.02, 0.14, 0.02, 0x555555, -0.06, -0.04, -0.55));
-    g.add(box(0.02, 0.14, 0.02, 0x555555,  0.06, -0.04, -0.55));
-
   } else if (def.id === 'huntingRifle') {
     // Bolt-action — wood stock, long barrel, no mag (single shot)
     g.add(box(0.10, 0.14, 1.10, 0x6b4226, 0, 0, 0));            // wood body
@@ -305,23 +249,6 @@ function _buildGunModelRaw(def, scale = 1) {
     // Bolt handle (sticks out the side)
     g.add(box(0.16, 0.04, 0.04, 0x555555, 0.10, 0.06, 0.05));
     g.add(cyl(0.035, 0.035, 0x444444, 0.18, 0.04, 0.05, 0));    // bolt knob
-
-  } else if (def.id === 'thunderLance') {
-    // Electric orb launcher — coiled housing, glowing emissive tip
-    g.add(box(0.15, 0.15, 0.82, 0x1a1a3a, 0, 0, 0));            // body
-    g.add(cyl(0.07, 0.60, 0x0a0a2a, 0, 0, -0.28, Math.PI/2));  // barrel tube
-    // Electric coil rings along barrel
-    for (const oz of [-0.10, -0.25, -0.40, -0.55]) {
-      g.add(cyl(0.09, 0.03, def.rarityColor, 0, 0, oz, Math.PI/2));
-    }
-    // Glowing orb muzzle
-    const orbMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), orbMat);
-    orb.position.set(0, 0, -0.62); g.add(orb);
-    g.add(box(0.11, 0.24, 0.14, 0x111122, 0, -0.18, 0.22));     // grip
-    g.add(box(0.04, 0.08, 0.15, 0x080810, 0, -0.08, 0.10));     // trigger
-    // Energy cell on top
-    g.add(box(0.06, 0.10, 0.26, def.rarityColor, 0, 0.13, 0.12));
 
   } else if (def.id === 'phaseRifle') {
     // Sleek futuristic teleport rifle — glowing phase coils, portal-disk muzzle
@@ -456,25 +383,21 @@ export class WeaponPickup {
 // Rarity weights: higher index = rarer. Weights must sum to 100.
 export const RARITY_POOL = [
   // Common
-  { id: 'pistol',         weight: 16 },
-  { id: 'revolver',       weight: 12 },
-  { id: 'handCannon',     weight: 10 },
+  { id: 'pistol',         weight: 25 },
   // Uncommon
-  { id: 'smg',            weight: 11 },
-  { id: 'burstRifle',     weight:  9 },
-  { id: 'crossbow',       weight:  7 },
+  { id: 'smg',            weight: 18 },
+  { id: 'crossbow',       weight: 10 },
   // Rare
-  { id: 'ar',             weight:  9 },
-  { id: 'heavyAR',        weight:  6 },
-  { id: 'scoutRifle',     weight:  5 },
+  { id: 'ar',             weight: 12 },
+  { id: 'heavyAR',        weight:  9 },
   // Epic
-  { id: 'shotgun',        weight:  5 },
-  { id: 'dualPistols',    weight:  4 },
-  { id: 'huntingRifle',   weight:  3 },
+  { id: 'shotgun',        weight:  6 },
+  { id: 'dualPistols',    weight:  5 },
+  { id: 'huntingRifle',   weight:  4 },
+  { id: 'handCannon',     weight:  5 },
   // Legendary
   { id: 'sniper',         weight:  3 },
   { id: 'rocketLauncher', weight:  2 },
-  { id: 'thunderLance',   weight:  1 },
   // Mythic
   { id: 'minigun',        weight:  0.8},
   { id: 'phaseRifle',     weight:  0.5},
@@ -553,16 +476,28 @@ const SPAWN_POINTS = [
   { x: -117, z: -128 },  // house
   { x: -105, z: -128 },  // house
 
-  // Samuel's Mansion (center 190, 120) — higher rarity expected here
-  { x:  190, z:  118 },  // grand hall
-  { x:  187, z:  120 },  // gallery
-  { x:  209, z:  120 },  // dining room
-  { x:  190, z:  137 },  // ballroom
-  { x:  209, z:  145 },  // kitchen
-  { x:  171, z:  145 },  // library
-  { x:  171, z:  164 },  // secret vault (high chance of epic/legendary)
-  { x:  171, z:  164 },  // vault second chest
-  { x:  171, z:  198 },  // secret exit bunker
+  // Samuel's Mansion (center 190, 120) — three-level mansion.
+  // dy is the y-offset above terrain: 0 = basement floor, 5 = ground floor, 10 = upper floor.
+  // Ground floor
+  { x:  190, z:  110, dy: 5 },  // foyer
+  { x:  178, z:  113, dy: 5 },  // drawing room
+  { x:  202, z:  114, dy: 5 },  // dining room
+  { x:  190, z:  125, dy: 5 },  // great hall
+  { x:  178, z:  127, dy: 5 },  // library
+  { x:  204, z:  131, dy: 5 },  // kitchen
+  // Upper floor
+  { x:  181, z:  110, dy: 10 }, // SW bedroom
+  { x:  199, z:  115, dy: 10 }, // SE bedroom
+  { x:  185, z:  130, dy: 10 }, // master bedroom
+  { x:  202, z:  130, dy: 10 }, // NE bedroom
+  // Basement (loot vault feel)
+  { x:  186, z:  109, dy: 0 },  // basement west
+  { x:  202, z:  130, dy: 0 },  // basement workbench
+  { x:  178, z:  111, dy: 0 },  // basement storage
+  // Tunnel + surface exit
+  { x:  190, z:  155, dy: 0 },  // tunnel north run (mid)
+  { x:  175, z:  190, dy: 0 },  // tunnel west run
+  { x:  171, z:  195, dy: 0 },  // secret exit ruin
 ];
 
 export class WeaponSystem {
@@ -579,7 +514,8 @@ export class WeaponSystem {
       const h = this.world.getTerrainHeight(s.x, s.z);
       if (h < 0.2) continue;
       const def = randomWeaponDef();
-      this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, h, s.z)));
+      const y = h + (s.dy ?? 0);
+      this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, y, s.z)));
     }
   }
 

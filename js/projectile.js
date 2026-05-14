@@ -74,8 +74,9 @@ export class ProjectileSystem {
     this._tempEffects   = []; // nuclear explosion mesh effects
 
     // Callbacks wired by main.js
-    this.onEnemyHit = null;
+    this.onEnemyHit  = null;
     this.onPlayerHit = null;
+    this.onExplosion = null; // (pos, defId) → void
   }
 
   spawn(origin, direction, opts = {}) {
@@ -282,6 +283,7 @@ export class ProjectileSystem {
       this._nuclearExplosion(pos, def, particles, player, enemyManager);
       return;
     }
+    if (this.onExplosion) this.onExplosion(pos.clone(), def.id);
 
     const radius = def.explosionRadius ?? 8;
     const dmg    = def.explosionDamage ?? 80;
@@ -338,6 +340,7 @@ export class ProjectileSystem {
   }
 
   _nuclearExplosion(pos, def, particles, player, enemyManager) {
+    if (this.onExplosion) this.onExplosion(pos.clone(), 'nukeExplosion');
     const radius = def.explosionRadius ?? 45;
     const dmg    = def.explosionDamage ?? 280;
 

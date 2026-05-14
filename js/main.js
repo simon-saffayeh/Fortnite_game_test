@@ -14,6 +14,7 @@ import { ScreenShake, MuzzleFlash, DamageNumbers, DirectionalDamage, HitMarker }
 import { NetworkManager, MP_SPAWNS } from './multiplayer.js';
 import { BuildingSystem } from './building.js';
 import { ZombieWaveManager } from './zombie.js';
+import { AudioManager } from './audio.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -234,35 +235,36 @@ class Game {
   }
 
   async _loadWorld() {
-    const steps = [
-      'Generating terrain…', 'Planting trees…', 'Building structures…',
-      'Spawning weapons…', 'Placing med kits…',
-      this.mode === 'solo' ? 'Deploying enemies…' : 'Connecting players…',
-      'Charging storm…', 'Ready!',
-    ];
-    const bar = document.getElementById('loading-bar');
-    const txt = document.getElementById('loading-text');
-    for (let i = 0; i < steps.length; i++) {
-      txt.textContent = steps[i];
-      bar.style.width = `${((i + 1) / steps.length) * 100}%`;
-      await sleep(240 + Math.random() * 140);
-    }
+    const bar  = document.getElementById('loading-bar');
+    const txt  = document.getElementById('loading-text');
+    const step = (msg, pct) => { txt.textContent = msg; bar.style.width = pct + '%'; };
+    const frame = () => new Promise(r => requestAnimationFrame(r));
 
-    // ── Core world ───────────────────────────────────────────────────────
-    this.world  = new World(this.scene);
+    // ── 1. Terrain ────────────────────────────────────────────────────
+    step('Generating terrain…', 12);
+    await frame(); // let bar paint before synchronous terrain build
+    this.world = new World(this.scene);
     this.world.generate();
-    await this.world.loadFurniture();
+
+    // ── 2. Nature ─────────────────────────────────────────────────────
+    step('Planting trees…', 25);
     await this.world.loadNature();
 
-    // ── Spawn position ───────────────────────────────────────────────────
+    // ── 3. Structures ─────────────────────────────────────────────────
+    step('Building structures…', 37);
+    await this.world.loadFurniture();
+
+    // ── 4. Core systems ───────────────────────────────────────────────
+    step('Spawning weapons…', 50);
+    await frame();
+
     let spawnPos;
     if (this.mode === 'solo' || this.mode === 'zombie') {
       spawnPos = this.world.getSpawnPosition();
     } else {
       const idx = (parseInt(this.net.myId) - 1) % MP_SPAWNS.length;
       const [sx, sz] = MP_SPAWNS[idx];
-      const sh = this.world.getTerrainHeight(sx, sz);
-      spawnPos = new THREE.Vector3(sx, sh + 1.5, sz);
+      spawnPos = new THREE.Vector3(sx, this.world.getTerrainHeight(sx, sz) + 1.5, sz);
     }
 
     this.player    = new Player(this.scene, spawnPos, this.world);
@@ -270,18 +272,23 @@ class Game {
     if (biSettings.sensitivity) this.player._sensMultiplier = biSettings.sensitivity;
     this.camera3P  = new ThirdPersonCamera(this.camera, this.player);
     this.particles = new ParticleSystem(this.scene);
-
-    // ── Combat systems ────────────────────────────────────────────────
     this.projectiles = new ProjectileSystem(this.scene, this.world);
+    this.weapons   = new WeaponSystem(this.scene, this.world);
+    this.inventory = new Inventory(this.player);
+    this.pickups   = new PickupManager(this.scene, this.world);
+
+    // ── 5. Enemies / players ──────────────────────────────────────────
+    step('Placing med kits…', 62);
+    await frame();
 
     if (this.mode === 'solo') {
-      this.enemies    = new EnemyManager(this.scene, this.world, this.projectiles);
+      this.enemies     = new EnemyManager(this.scene, this.world, this.projectiles);
       this.zombieWaves = null;
     } else if (this.mode === 'zombie') {
-      this.enemies    = null;
+      this.enemies     = null;
       this.zombieWaves = new ZombieWaveManager(this.scene, this.world, this.projectiles);
     } else {
-      this.enemies    = null;
+      this.enemies     = null;
       this.zombieWaves = null;
       const mpSpawnVecs = MP_SPAWNS.map(([x, z]) => {
         const h = this.world.getTerrainHeight(x, z);
@@ -290,19 +297,19 @@ class Game {
       this.net.spawnRemotePlayers(this.scene, mpSpawnVecs);
     }
 
-    this.weapons   = new WeaponSystem(this.scene, this.world);
-    this.inventory = new Inventory(this.player);
-    this.pickups   = new PickupManager(this.scene, this.world);
-    this.storm     = this.mode === 'zombie' ? null : new Storm(this.scene);
+    // ── 6. Effects, audio, building ───────────────────────────────────
+    step(this.mode === 'solo' ? 'Deploying enemies…' : 'Connecting players…', 75);
 
-    // ── Effects ───────────────────────────────────────────────────────
+    this.storm   = this.mode === 'zombie' ? null : new Storm(this.scene);
     this.shake   = new ScreenShake();
     this.muzzle  = new MuzzleFlash(this.scene);
     this.dmgNums = new DamageNumbers();
     this.dirDmg  = new DirectionalDamage();
     this.hitMark = new HitMarker();
 
-    // ── Building ──────────────────────────────────────────────────────
+    this.audio = new AudioManager();
+    const audioReady = this.audio.init(); // fire off async fetch, await later
+
     if (this.buildEnabled) {
       this.building = new BuildingSystem(this.scene, this.world);
       if (this.net) {
@@ -314,7 +321,6 @@ class Game {
     }
     this.projectiles.buildingSystem = this.building;
 
-    // ── Composite collision provider (build pieces + static world) ────
     const building = this.building;
     const staticC  = this.world.staticCollider;
     this.player.collisionProvider = {
@@ -334,22 +340,17 @@ class Game {
       },
     };
 
-    // ── Map ───────────────────────────────────────────────────────────
-    this._mapOverlay  = document.getElementById('map-overlay');
-    this._mapTerrain  = this.world.renderMapCanvas();
-    this._mapOpen     = false;
+    this._mapOverlay = document.getElementById('map-overlay');
+    this._mapTerrain = this.world.renderMapCanvas();
+    this._mapOpen    = false;
 
-    // ── HUD ───────────────────────────────────────────────────────────
     this.hud = new HUD(this.player, this.world, this.enemies, this.inventory, this.storm);
     this.hud.setWeaponSystem(this.weapons);
     this.hud.setPickupManager(this.pickups);
-
-    // ── Heal channel progress ─────────────────────────────────────────
     this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
 
-    // ── Starting weapon ───────────────────────────────────────────────
     if (this.testingEnabled) {
-      for (const id of ['phaseRifle', 'sniper', 'rocketLauncher', 'thunderLance', 'minigun', 'bombLauncher']) {
+      for (const id of ['phaseRifle', 'sniper', 'rocketLauncher', 'minigun', 'bombLauncher']) {
         this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS[id]));
       }
       this.player._sprintMultiplier = 2.0;
@@ -357,16 +358,18 @@ class Game {
       this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.pistol));
     }
 
-    // ── Prewarm gun model cache + explosion particle materials + shaders ──
-    // Building each gun model once at startup populates the cache so future
-    // pickups clone instead of re-allocating geometry/materials; doing it now
-    // (before the first render) folds the shader compile into the load screen
-    // instead of stuttering the first time the player swaps weapons.
+    // ── 7. Shader prewarm + compile ───────────────────────────────────
+    step('Charging storm…', 87);
+    await frame(); // paint before GPU-blocking compile calls
+
+    const _prewarmGroup = new THREE.Group();
+    _prewarmGroup.visible = false;
     for (const id of Object.keys(WEAPON_DEFS)) {
-      buildGunModel(WEAPON_DEFS[id], 0.58);
+      _prewarmGroup.add(buildGunModel(WEAPON_DEFS[id], 0.58));
       buildGunModel(WEAPON_DEFS[id], 1.15);
     }
-    // Prewarm common burst-particle materials (nuke, normal explosion, hit fx)
+    this.scene.add(_prewarmGroup);
+
     const _warmColors = [
       [0xffffff, 0.9], [0xff7700, 0.65], [0xff3300, 0.55], [0xffdd00, 0.45],
       [0xff2200, 0.22], [0x333333, 0.75], [0x222222, 1.0], [0xff5500, 0.55],
@@ -376,8 +379,38 @@ class Game {
       [0xff1111, 0.2],
     ];
     for (const [c, s] of _warmColors) this.particles._getBurstMaterial(c, s);
-    // Force shader compile for everything currently in scene
+
+    const _fxMat = (side = THREE.FrontSide) => new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 1, depthWrite: false, side,
+    });
+    const _fxGeos = [
+      new THREE.SphereGeometry(1, 14, 10),
+      new THREE.TorusGeometry(1, 0.55, 6, 48),
+      new THREE.TorusGeometry(1, 0.7, 8, 32),
+      new THREE.CylinderGeometry(1, 1, 1, 12),
+    ];
+    const _fxMeshes = [];
+    for (const geo of _fxGeos) {
+      const mFront  = new THREE.Mesh(geo, _fxMat(THREE.FrontSide));
+      const mDouble = new THREE.Mesh(geo, _fxMat(THREE.DoubleSide));
+      mFront.position.set(0, -9999, 0);
+      mDouble.position.set(0, -9999, 0);
+      this.scene.add(mFront); this.scene.add(mDouble);
+      _fxMeshes.push(mFront, mDouble);
+    }
+
     this.renderer.compile(this.scene, this.camera);
+    const _prewarmLight = new THREE.PointLight(0xff8822, 0.0001, 1);
+    _prewarmLight.position.set(0, -9999, 0);
+    this.scene.add(_prewarmLight);
+    this.renderer.compile(this.scene, this.camera);
+    this.scene.remove(_prewarmLight);
+
+    this.scene.remove(_prewarmGroup);
+    for (const m of _fxMeshes) { this.scene.remove(m); m.material.dispose(); }
+    for (const g of _fxGeos) g.dispose();
+
+    await audioReady; // audio fetches ran in parallel — should be done by now
 
     // ── Wire callbacks ────────────────────────────────────────────────
     this._totalEnemies = this.enemies?.enemies.length ?? 0;
@@ -434,21 +467,17 @@ class Game {
         this._updateZombieHUD(secs, next);
       };
     } else {
-      // Multiplayer enemy-remaining → players remaining
       const totalPlayers = this.net.players.size;
       this.hud.setEnemiesRemaining(totalPlayers - 1, totalPlayers - 1);
       document.querySelector('.er-label').textContent = 'PLAYERS';
 
-      // Incoming damage from other players
       this.net.onLocalHit = (damage, fromId) => {
         const srcPos = this.net.remotePlayers.get(fromId)?.root.position ?? null;
         const killerName = this.net.players.get(fromId)?.name ?? 'a player';
         this.player.takeDamage(damage, false, srcPos, killerName);
       };
 
-      // Remote player died
       this.net.onRemoteDeath = (msg) => {
-        // Only credit a kill if we were the last to hit this player
         if (this._lastHitTarget === msg.id) {
           this._playerKills++;
           this.hud.addKill(this.net.players.get(msg.id)?.name ?? 'Player');
@@ -463,20 +492,21 @@ class Game {
         }
       };
 
-      // Visual shoot from remote player
       this.net.onRemoteShoot = (msg) => {
         const orig = new THREE.Vector3(...msg.orig);
         const dir  = new THREE.Vector3(...msg.dir);
         this.projectiles.spawn(orig, dir, { speed: 180, damage: 0, faction: 'remote', range: 300 });
+        if (this.audio && msg.weapon) {
+          const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+          this.audio.playAt(msg.weapon, orig, this.player.getPosition(), right);
+        }
       };
 
-      // When we hit a remote player — track who we last hit for kill credit
       this.projectiles.onRemotePlayerHit = (targetId, damage) => {
         this.net.sendHit(targetId, damage);
         this.hitMark.hit(false);
         this._lastHitTarget = targetId;
 
-        // Server won't echo the hit back to us, so update locally
         const rp = this.net.remotePlayers.get(targetId);
         if (rp) {
           rp.takeDamage(damage);
@@ -486,6 +516,11 @@ class Game {
       };
     }
 
+    this.projectiles.onExplosion = (pos, soundId) => {
+      const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+      this.audio?.playAt(soundId, pos, this.player.getPosition(), right);
+    };
+
     this.projectiles.onEnemyHit = (pos, damage, _enemy, justKilled, headshot) => {
       const numPos = pos.clone().add(new THREE.Vector3(0, 0.8, 0));
       this.dmgNums.show(numPos, damage, this.camera, this.canvas, headshot);
@@ -493,7 +528,10 @@ class Game {
       this.hitMark.hit(justKilled);
     };
 
-    // ── Fade out loading screen ───────────────────────────────────────
+    // ── 8. Ready ──────────────────────────────────────────────────────
+    step('Ready!', 100);
+    await frame(); // let browser paint Ready! before the fade starts
+
     const loading = document.getElementById('loading-screen');
     loading.classList.add('fade-out');
     setTimeout(() => loading.style.display = 'none', 800);
@@ -503,6 +541,7 @@ class Game {
 
   _setupEvents() {
     this.canvas.addEventListener('click', () => {
+      this.audio?.resume();
       if (!document.pointerLockElement) this.canvas.requestPointerLock();
     });
 
@@ -604,8 +643,11 @@ class Game {
       });
     }
 
+    // Local gunshot audio — one shot per bullet (semi- and full-auto alike)
+    this.audio?.playLocal(weapon.def.id);
+
     // Broadcast shot to other players
-    if (this.net) this.net.sendShoot(origin, camDir);
+    if (this.net) this.net.sendShoot(origin, camDir, weapon.def.id);
 
     const muzzlePos = origin.clone().addScaledVector(camDir, 1.2);
     this.muzzle.flash(muzzlePos, 3.5);
