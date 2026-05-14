@@ -73,6 +73,13 @@ export class ProjectileSystem {
     this.buildingSystem = null;
     this._tempEffects   = []; // nuclear explosion mesh effects
 
+    // One persistent explosion light. Adding/removing a light changes the
+    // scene light count and forces a full shader recompile (freeze), so we
+    // keep it in the scene permanently and just modulate its intensity.
+    this._explosionLight = new THREE.PointLight(0xff8822, 0, 120);
+    this._explosionLight.castShadow = false;
+    scene.add(this._explosionLight);
+
     // Callbacks wired by main.js
     this.onEnemyHit  = null;
     this.onPlayerHit = null;
@@ -128,7 +135,7 @@ export class ProjectileSystem {
       const alive = fx.age < fx.duration;
       if (!alive) {
         if (fx.mesh)  this.scene.remove(fx.mesh);
-        if (fx.light) this.scene.remove(fx.light);
+        if (fx.light) fx.light.intensity = 0; // persistent — just dim it
       }
       return alive;
     });
@@ -423,11 +430,10 @@ export class ProjectileSystem {
     capM.position.copy(pos).setY(pos.y + 20);
     this._tempEffects.push({ type: 'cap', mesh: capM, mat: capMat, age: 0, duration: 3.0, maxR: 14, baseY: pos.y + 20, riseH: 10 });
 
-    // 5. Point light
-    const light = new THREE.PointLight(0xff8822, 12, 120);
-    light.position.copy(pos).setY(pos.y + 5);
-    this.scene.add(light);
-    this._tempEffects.push({ type: 'light', light, age: 0, duration: 2.0, maxI: 12 });
+    // 5. Point light — reuse the persistent light instead of add/remove
+    this._explosionLight.position.copy(pos).setY(pos.y + 5);
+    this._explosionLight.intensity = 12;
+    this._tempEffects.push({ type: 'light', light: this._explosionLight, age: 0, duration: 2.0, maxI: 12 });
   }
 
   _kill(b) {

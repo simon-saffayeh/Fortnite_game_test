@@ -21,6 +21,21 @@ const SOUND_FILES = {
   minigun:         'sounds/full_auto_sounds/smg_shot.wav',
 };
 
+// Per-sound volume multipliers. 1.0 = no adjustment.
+// Tweak these to balance loudness across all weapons/effects.
+const VOLUME_WEIGHTS = {
+  pistol:         1.0,
+  shotgun:        1.0,
+  handCannon:     1.0,
+  sniper:         1.0,
+  rocketLauncher: 1.0,
+  nukeExplosion:  1.8,
+  ar:             1.0,
+  heavyAR:        1.0,
+  smg:            1.0,
+  minigun:        1.0,
+};
+
 // Per-shot playback-rate variation (±) — keeps rapid fire from sounding robotic
 const PITCH_JITTER = 0.06;
 
@@ -85,7 +100,7 @@ export class AudioManager {
     src.buffer = buf;
     src.playbackRate.value = this._jitterRate();
     const g = this.ctx.createGain();
-    g.gain.value = 1.0;
+    g.gain.value = VOLUME_WEIGHTS[weaponId] ?? 1.0;
     src.connect(g).connect(this.masterGain);
     src.start();
   }
@@ -117,7 +132,7 @@ export class AudioManager {
     src.playbackRate.value = this._jitterRate();
 
     const g = this.ctx.createGain();
-    g.gain.value = vol;
+    g.gain.value = vol * (VOLUME_WEIGHTS[weaponId] ?? 1.0);
     src.connect(g);
     let tail = g;
 

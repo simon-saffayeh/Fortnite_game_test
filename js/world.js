@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ── Seeded PRNG (LCG) — for reproducible tree/prop/cloud placement ───────────
 const WORLD_SEED = 42;
@@ -547,86 +548,93 @@ export class World {
     const leaf2Mat = new THREE.MeshLambertMaterial({ color: 0x1a5c1a });
     const palmMat  = new THREE.MeshLambertMaterial({ color: 0x8bc34a });
 
-    const R = this.resolution;
     const S = this.size;
-
     const rng = this._rng;
+
+    // Trees never move and aren't collision objects, so instead of ~2400 small
+    // meshes (one Group of cylinders/cones per tree) we bake every part's
+    // transform into its geometry and merge into one static mesh per material.
+    // Result is pixel-identical but turns ~2400 draw calls into 4.
+    const buckets = { trunk: [], leaf1: [], leaf2: [], palm: [] };
+    const treeMat = new THREE.Matrix4();
+
     for (let attempt = 0; attempt < 600; attempt++) {
       const x = (rng() - 0.5) * S * 0.78;
       const z = (rng() - 0.5) * S * 0.78;
       const h = this._getHeight(x, z);
       if (h < 0.5 || h > 24) continue;
 
-      const palm = h < 3.5;
-      const group = palm
-        ? this._makePalmTree(trunkMat, palmMat, rng)
-        : this._makePineTree(trunkMat, leaf1Mat, leaf2Mat, rng);
+      treeMat.makeRotationY(rng() * Math.PI * 2);
+      treeMat.setPosition(x, h, z);
 
-      group.position.set(x, h, z);
-      group.rotation.y = rng() * Math.PI * 2;
-      this.scene.add(group);
-      this.trees.push(group);
+      const parts = (h < 3.5) ? this._makePalmTree(rng) : this._makePineTree(rng);
+      for (const part of parts) {
+        part.geo.applyMatrix4(treeMat);   // bake tree world transform
+        buckets[part.bucket].push(part.geo);
+      }
     }
+
+    const addMerged = (geos, mat, castShadow) => {
+      if (!geos.length) return;
+      const merged = mergeGeometries(geos);
+      geos.forEach(g => g.dispose());
+      const mesh = new THREE.Mesh(merged, mat);
+      mesh.castShadow = castShadow;
+      this.scene.add(mesh);
+      this.trees.push(mesh);
+    };
+    addMerged(buckets.trunk, trunkMat, true);   // pine + palm trunks (cast)
+    addMerged(buckets.leaf1, leaf1Mat, true);   // pine cones (cast)
+    addMerged(buckets.leaf2, leaf2Mat, true);   // pine cones (cast)
+    addMerged(buckets.palm,  palmMat,  false);  // palm fronds (no shadow, as before)
   }
 
-  _makePineTree(trunkMat, leaf1Mat, leaf2Mat, rng = Math.random) {
-    const g = new THREE.Group();
+  // Returns [{ geo, bucket }] — each geometry has its part-local transform
+  // already baked in, ready to be merged by _buildTrees.
+  _makePineTree(rng = Math.random) {
+    const parts = [];
     const height = 4 + rng() * 5;
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.28, height * 0.55, 7),
-      trunkMat
-    );
-    trunk.position.y = height * 0.27;
-    trunk.castShadow = true;
-    g.add(trunk);
+
+    const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, height * 0.55, 7);
+    trunkGeo.translate(0, height * 0.27, 0);
+    parts.push({ geo: trunkGeo, bucket: 'trunk' });
 
     const layers = 3 + Math.floor(rng() * 2);
     for (let l = 0; l < layers; l++) {
       const t = l / (layers - 1);
       const r = (0.9 - t * 0.5) * (height * 0.28);
-      const cone = new THREE.Mesh(
-        new THREE.ConeGeometry(r, height * 0.38, 8),
-        l % 2 === 0 ? leaf1Mat : leaf2Mat
-      );
-      cone.position.y = height * 0.38 + l * height * 0.22;
-      cone.castShadow = true;
-      g.add(cone);
+      const coneGeo = new THREE.ConeGeometry(r, height * 0.38, 8);
+      coneGeo.translate(0, height * 0.38 + l * height * 0.22, 0);
+      parts.push({ geo: coneGeo, bucket: l % 2 === 0 ? 'leaf1' : 'leaf2' });
     }
-    return g;
+    return parts;
   }
 
-  _makePalmTree(trunkMat, leafMat, rng = Math.random) {
-    const g = new THREE.Group();
+  _makePalmTree(rng = Math.random) {
+    const parts = [];
     const height = 5 + rng() * 4;
+    const m = new THREE.Matrix4();
 
     // Curved trunk segments
     for (let s = 0; s < 5; s++) {
-      const seg = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.2, height / 5, 7),
-        trunkMat
-      );
-      seg.position.y = (s + 0.5) * (height / 5);
-      seg.rotation.x = (rng() - 0.5) * 0.1;
-      seg.castShadow = true;
-      g.add(seg);
+      const segGeo = new THREE.CylinderGeometry(0.12, 0.2, height / 5, 7);
+      m.makeRotationX((rng() - 0.5) * 0.1);
+      m.setPosition(0, (s + 0.5) * (height / 5), 0);
+      segGeo.applyMatrix4(m);
+      parts.push({ geo: segGeo, bucket: 'trunk' });
     }
 
     // Palm fronds
     const fronds = 6 + Math.floor(rng() * 4);
     for (let f = 0; f < fronds; f++) {
       const angle = (f / fronds) * Math.PI * 2;
-      const frond = new THREE.Mesh(
-        new THREE.ConeGeometry(0.15, 2.5 + rng(), 5),
-        leafMat
-      );
-      frond.position.y = height;
-      frond.position.x = Math.cos(angle) * 0.3;
-      frond.position.z = Math.sin(angle) * 0.3;
-      frond.rotation.z = angle + Math.PI / 2;
-      frond.rotation.x = 0.5 + rng() * 0.4;
-      g.add(frond);
+      const frondGeo = new THREE.ConeGeometry(0.15, 2.5 + rng(), 5);
+      m.makeRotationFromEuler(new THREE.Euler(0.5 + rng() * 0.4, 0, angle + Math.PI / 2));
+      m.setPosition(Math.cos(angle) * 0.3, height, Math.sin(angle) * 0.3);
+      frondGeo.applyMatrix4(m);
+      parts.push({ geo: frondGeo, bucket: 'palm' });
     }
-    return g;
+    return parts;
   }
 
   // ── Points of Interest ──────────────────────────────────────────────
@@ -993,27 +1001,63 @@ export class World {
   }
 
   // ── Furniture loader ────────────────────────────────────────────────
+  // Render every placement of a GLB model as one InstancedMesh per sub-mesh,
+  // instead of one cloned Group per placement. Pixel-identical (shared geometry,
+  // material and shadows) but collapses hundreds of draw calls into a handful.
+  // placements: [{ wx, wy, wz, rotY, scale }] — wy is the world floor Y; the
+  // model's bottom is auto-aligned to it (matching the old per-clone behaviour).
+  _instanceClones(model, placements) {
+    if (!placements.length) return;
+    model.updateMatrixWorld(true);
+
+    // Bottom-Y offset at scale 1 (Y-rotation doesn't change it; scale is linear).
+    const baseOffset = -new THREE.Box3().setFromObject(model).min.y;
+    const rootInv = new THREE.Matrix4().copy(model.matrixWorld).invert();
+
+    const subMeshes = [];
+    model.traverse(c => { if (c.isMesh) subMeshes.push(c); });
+
+    const yAxis  = new THREE.Vector3(0, 1, 0);
+    const quat   = new THREE.Quaternion();
+    const pos    = new THREE.Vector3();
+    const scl    = new THREE.Vector3();
+    const placeM = new THREE.Matrix4();
+    const finalM = new THREE.Matrix4();
+
+    for (const src of subMeshes) {
+      // Sub-mesh transform relative to the model root.
+      const localM = new THREE.Matrix4().multiplyMatrices(rootInv, src.matrixWorld);
+      const inst = new THREE.InstancedMesh(src.geometry, src.material, placements.length);
+      inst.castShadow = true;
+      inst.receiveShadow = true;
+
+      placements.forEach((p, i) => {
+        quat.setFromAxisAngle(yAxis, p.rotY);
+        pos.set(p.wx, p.wy + baseOffset * p.scale, p.wz);
+        scl.setScalar(p.scale);
+        placeM.compose(pos, quat, scl);
+        finalM.multiplyMatrices(placeM, localM);
+        inst.setMatrixAt(i, finalM);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      // Instances span the whole map; recompute the bounding volume so the
+      // renderer frustum-culls the group correctly instead of by instance 0.
+      inst.computeBoundingSphere();
+      this.scene.add(inst);
+    }
+  }
+
   async loadFurniture() {
     const loader = new GLTFLoader();
     const load = path => new Promise((res, rej) =>
       loader.load(path, g => res(g.scene), null, rej));
 
-    // Pre-compute the bottom-Y offset for each model so it sits flush on the floor
-    const floorOffset = model => {
-      const box = new THREE.Box3().setFromObject(model);
-      return -box.min.y; // shift up so bottom = 0
-    };
-
-    // Helper: place a loaded GLB clone at world pos with optional y-rotation and scale
-    // wy = world floor Y; model bottom is automatically aligned to wy
+    // Collect placements per model, then instance them all at the end.
+    const _placements = new Map();
     const place = (model, wx, wy, wz, rotY = 0, scale = 1) => {
-      const obj = model.clone(true);
-      obj.scale.setScalar(scale);
-      obj.rotation.y = rotY;
-      const offset = floorOffset(obj);
-      obj.position.set(wx, wy + offset, wz);
-      obj.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-      this.scene.add(obj);
+      let arr = _placements.get(model);
+      if (!arr) { arr = []; _placements.set(model, arr); }
+      arr.push({ wx, wy, wz, rotY, scale });
     };
 
     // Load all models (parallel)
@@ -1276,6 +1320,9 @@ export class World {
     // Reading nook in the basement (rare for a basement, but Samuel was eccentric)
     place(sofa3,       186,  smB, 109,   0,              1);
     place(nightstand,  189,  smB, 109,   Math.PI,        1);
+
+    // Render all collected placements as instanced meshes.
+    for (const [model, list] of _placements) this._instanceClones(model, list);
   }
 
   // ── Samuel's Mansion ────────────────────────────────────────────────
@@ -1627,22 +1674,14 @@ export class World {
     const load = path => new Promise((res, rej) =>
       loader.load(path, g => res(g.scene), null, rej));
 
-    const floorOffset = model => {
-      const box = new THREE.Box3().setFromObject(model);
-      return -box.min.y;
-    };
-
-    // Place a nature model at world ground level; scale defaults to 1
+    // Collect placements per model, then instance them all at the end.
+    const _placements = new Map();
     const placeNature = (model, wx, wz, rotY = 0, scale = 1) => {
-      const obj = model.clone(true);
-      obj.scale.setScalar(scale);
-      obj.rotation.y = rotY;
       const wy = this._getHeight(wx, wz);
       if (wy < 0) return;
-      const offset = floorOffset(obj);
-      obj.position.set(wx, wy + offset, wz);
-      obj.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; } });
-      this.scene.add(obj);
+      let arr = _placements.get(model);
+      if (!arr) { arr = []; _placements.set(model, arr); }
+      arr.push({ wx, wy, wz, rotY, scale });
     };
 
     // Load the subset of models we'll use
@@ -1799,6 +1838,9 @@ export class World {
       { x:  12,  z: -172, m: twistedTree, r: PI*0.6,   s: 0.9 },
     ];
     for (const t of mapTrees) placeNature(t.m, t.x, t.z, t.r, t.s);
+
+    // Render all collected placements as instanced meshes.
+    for (const [model, list] of _placements) this._instanceClones(model, list);
   }
 
   _makeCedarCreek() {

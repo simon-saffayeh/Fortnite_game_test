@@ -25,6 +25,18 @@ class Menu {
     this._ready  = false;
     this._myName = localStorage.getItem('bi_name') || `Player${Math.floor(Math.random() * 90) + 10}`;
 
+    // Lobby music — starts on first user interaction, stops when entering game
+    this._music = new Audio('sounds/music/lobby_music.mp3');
+    this._music.loop   = true;
+    this._music.volume = 0.4;
+    const startMusic = () => {
+      this._music.play().catch(() => {});
+      document.removeEventListener('click',   startMusic);
+      document.removeEventListener('keydown', startMusic);
+    };
+    document.addEventListener('click',   startMusic);
+    document.addEventListener('keydown', startMusic);
+
     document.getElementById('btn-solo').addEventListener('click', () => this._startSolo());
     document.getElementById('btn-zombie').addEventListener('click', () => this._startZombie());
     document.getElementById('btn-multiplayer').addEventListener('click', () => this._openLobby());
@@ -69,7 +81,7 @@ class Menu {
       hs.style.display = 'none';
       document.getElementById('loading-screen').classList.remove('hidden');
     }, 380);
-    setTimeout(() => new Game('solo', null, buildEnabled, testingEnabled), 420);
+    setTimeout(() => new Game('solo', null, buildEnabled, testingEnabled, this._music), 420);
   }
 
   _startZombie() {
@@ -81,7 +93,7 @@ class Menu {
       hs.style.display = 'none';
       document.getElementById('loading-screen').classList.remove('hidden');
     }, 380);
-    setTimeout(() => new Game('zombie', null, buildEnabled, testingEnabled), 420);
+    setTimeout(() => new Game('zombie', null, buildEnabled, testingEnabled, this._music), 420);
   }
 
   async _openLobby() {
@@ -133,7 +145,7 @@ class Menu {
       const testingEnabled = this._testingEnabled();
       document.getElementById('lobby-screen').classList.add('hidden');
       document.getElementById('loading-screen').classList.remove('hidden');
-      setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled), 120);
+      setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled, this._music), 120);
     };
 
     document.getElementById('lobby-screen').classList.remove('hidden');
@@ -185,11 +197,12 @@ class Menu {
 
 // ── Game ──────────────────────────────────────────────────────────────────────
 class Game {
-  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false) {
+  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false, lobbyMusic = null) {
     this.mode           = mode;
     this.net            = net;
     this.buildEnabled   = buildEnabled;
     this.testingEnabled = testingEnabled;
+    this._lobbyMusic    = lobbyMusic;
     this.canvas = document.getElementById('game-canvas');
     this.clock  = new THREE.Clock();
     this.running = false;
@@ -531,6 +544,8 @@ class Game {
     // ── 8. Ready ──────────────────────────────────────────────────────
     step('Ready!', 100);
     await frame(); // let browser paint Ready! before the fade starts
+
+    if (this._lobbyMusic) { this._lobbyMusic.pause(); this._lobbyMusic.currentTime = 0; }
 
     const loading = document.getElementById('loading-screen');
     loading.classList.add('fade-out');

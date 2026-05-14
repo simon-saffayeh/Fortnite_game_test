@@ -76,6 +76,13 @@ class BuildPiece {
     this.root.rotation.y = rotY;
   }
 
+  // Ghost-only: blue when placement is valid, red when unsupported.
+  setValid(valid) {
+    this.root.traverse(o => {
+      if (o.isMesh) o.material.color.setHex(valid ? 0x44aaff : 0xff4444);
+    });
+  }
+
   getBounds() { return new THREE.Box3().setFromObject(this.root); }
   remove()    { this.scene.remove(this.root); }
 }
@@ -132,8 +139,7 @@ export class BuildingSystem {
     }
 
     const t = this._calcTransform(camera);
-    this._canPlace = !!t;
-    if (!t) { this._killGhost(); return; }
+    if (!t) { this._killGhost(); this._canPlace = false; return; }
 
     if (!this._ghost || this._ghostType !== this.type) {
       this._killGhost();
@@ -142,6 +148,26 @@ export class BuildingSystem {
     }
 
     this._ghost.setTransform(t.pos, this.rotY);
+
+    // Pieces must be grounded or connected to an existing build — no
+    // floating structures. Tint the ghost red when placement is invalid.
+    this._canPlace = this._isSupported(this._ghost.getBounds());
+    this._ghost.setValid(this._canPlace);
+  }
+
+  // A candidate piece (given its world-space AABB) is supported if its base
+  // rests on the terrain, or it touches at least one already-placed piece.
+  _isSupported(bounds) {
+    const cx = (bounds.min.x + bounds.max.x) / 2;
+    const cz = (bounds.min.z + bounds.max.z) / 2;
+    const terrainY = this.world.getTerrainHeight(cx, cz);
+    if (bounds.min.y <= terrainY + 0.4) return true;
+
+    const expanded = bounds.clone().expandByScalar(0.25);
+    for (const piece of this.pieces) {
+      if (expanded.intersectsBox(piece.getBounds())) return true;
+    }
+    return false;
   }
 
   // Call on left-click while in build mode

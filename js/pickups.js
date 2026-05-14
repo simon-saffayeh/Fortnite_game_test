@@ -96,9 +96,9 @@ class HealthPickup {
     disc.position.y = -0.52;
     this.root.add(disc);
 
-    // Point light
-    this._light = new THREE.PointLight(def.color, 1.0, 4.5);
-    this.root.add(this._light);
+    // No per-pickup PointLight — see WeaponPickup: dynamic lights added/removed
+    // change the scene light count and force a full shader recompile (freeze).
+    // The glow shell + swirl band + ground disc carry the look on their own.
 
     scene.add(this.root);
   }
@@ -107,7 +107,6 @@ class HealthPickup {
     this._t += dt;
     this.root.position.y = this._baseY + Math.sin(this._t * 2.4) * 0.1;
     this.root.rotation.y = this._t * 0.9;
-    this._light.intensity = 0.8 + Math.sin(this._t * 3.5) * 0.3;
     if (this._band) this._band.rotation.y = this._t * 2;
   }
 

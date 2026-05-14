@@ -359,8 +359,10 @@ export class WeaponPickup {
     disc.position.y = -0.85;
     this.root.add(disc);
 
-    this._light = new THREE.PointLight(def.rarityColor, 1.4, 5.5);
-    this.root.add(this._light);
+    // No per-pickup PointLight: with ~60 pickups that's ~60 dynamic lights,
+    // and removing one on collect changes the scene light count, forcing every
+    // lit shader in the scene to recompile (a multi-second freeze). The glowing
+    // ring + disc + spinning gun already read clearly without a real light.
 
     scene.add(this.root);
   }
@@ -370,7 +372,6 @@ export class WeaponPickup {
     this.root.position.y = this._baseY + Math.sin(this._t * 2.2) * 0.12;
     this._gun.rotation.y = this._t * 1.1;
     this._ring.rotation.z = this._t * 0.7;
-    this._light.intensity = 1.0 + Math.sin(this._t * 4) * 0.4;
   }
 
   collect() {
