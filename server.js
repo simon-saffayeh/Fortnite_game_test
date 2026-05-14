@@ -16,6 +16,7 @@ const MIME = {
   '.jpg': 'image/jpeg', '.gif': 'image/gif',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
   '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
+  '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
 };
 
 // ── Lobby state ───────────────────────────────────────────────────────────────
@@ -32,9 +33,10 @@ const server = http.createServer((req, res) => {
   const ext        = path.extname(filePath);
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('404 Not Found: ' + url); return; }
+    const cacheable = ['.wav','.mp3','.ogg','.png','.jpg','.gif','.glb'].includes(ext);
     res.writeHead(200, {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': cacheable ? 'public, max-age=86400' : 'no-cache',
     });
     res.end(data);
   });

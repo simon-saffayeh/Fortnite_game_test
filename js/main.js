@@ -756,7 +756,44 @@ class Game {
       y: (wz / S + 0.5) * H,
     });
 
-    // POI labels
+    // ── Storm circle ────────────────────────────────────────────────────────
+    if (this.storm) {
+      const info = this.storm.getInfo();
+      const sr   = (info.radius / S) * W;
+      const c    = toCanvas(info.center.x, info.center.z);
+
+      // Tinted fill outside storm wall
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, W, H);
+      ctx.arc(c.x, c.y, sr, 0, Math.PI * 2, true); // counter-clockwise = subtract
+      ctx.fillStyle = 'rgba(60,20,180,0.32)';
+      ctx.fill('evenodd');
+      ctx.restore();
+
+      // Storm wall ring
+      ctx.strokeStyle = 'rgba(110,80,255,0.95)';
+      ctx.lineWidth   = 3;
+      ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(180,140,255,0.4)';
+      ctx.lineWidth   = 7;
+      ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
+
+      // Phase label above storm ring
+      const stateStr = info.state === 'waiting'   ? `Phase ${info.phase} — moves in ${info.timeLeft}s`
+                     : info.state === 'shrinking'  ? `Phase ${info.phase} — closing ${info.timeLeft}s`
+                     :                               'Final Zone';
+      ctx.font = 'bold 12px "Segoe UI", Arial';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(180,140,255,0.95)';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(stateStr, W / 2, 18);
+      ctx.fillText(stateStr, W / 2, 18);
+    }
+
+    // ── POI labels ───────────────────────────────────────────────────────────
     ctx.font = 'bold 11px "Segoe UI", Arial';
     ctx.textAlign = 'center';
     ctx.strokeStyle = '#000';
@@ -769,22 +806,105 @@ class Game {
       ctx.fillText(poi.name, x, y);
     }
 
-    // Player marker
-    const pp = this.player.getPosition();
+    // ── Enemy dots ───────────────────────────────────────────────────────────
+    const activeEnemyList = this.zombieWaves?.enemies ?? this.enemies?.enemies ?? [];
+    for (const e of activeEnemyList) {
+      if (e.dead || !e.root) continue;
+      const { x, y } = toCanvas(e.root.position.x, e.root.position.z);
+      ctx.fillStyle = '#ef4444';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+
+    // ── Weapon pickup dots ───────────────────────────────────────────────────
+    const weaponPickups = this.hud._weaponSystem?.pickups ?? [];
+    for (const p of weaponPickups) {
+      if (p.collected) continue;
+      const { x, y } = toCanvas(p.root.position.x, p.root.position.z);
+      const col = '#' + p.def.rarityColor.toString(16).padStart(6, '0');
+      ctx.fillStyle = col;
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+
+    // ── Health / shield pickup dots ──────────────────────────────────────────
+    const healPickups = this.hud._pickupManager?.pickups ?? [];
+    for (const p of healPickups) {
+      if (p.collected) continue;
+      const { x, y } = toCanvas(p.root.position.x, p.root.position.z);
+      ctx.fillStyle = p.def.healHp > 0 ? '#22ee66' : '#44aaff';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+
+    // ── Remote player markers (multiplayer) ──────────────────────────────────
+    if (this.net) {
+      for (const [, rp] of this.net.getRemotePlayers()) {
+        if (rp.dead) continue;
+        const rpos = rp.root.position;
+        const { x, y } = toCanvas(rpos.x, rpos.z);
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(-rp.root.rotation.y);
+        ctx.fillStyle   = '#ff8800';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth   = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -7); ctx.lineTo(4, 5); ctx.lineTo(0, 2); ctx.lineTo(-4, 5);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.restore();
+        // Name label
+        ctx.font = '9px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff8800';
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+        ctx.strokeText(rp.name, x, y - 10);
+        ctx.fillText(rp.name, x, y - 10);
+      }
+    }
+
+    // ── Player arrow (centred on own position) ───────────────────────────────
+    const pp  = this.player.getPosition();
     const { x: px, y: py } = toCanvas(pp.x, pp.z);
     const yaw = this.player.getYaw();
 
     ctx.save();
     ctx.translate(px, py);
     ctx.rotate(-yaw);
-    ctx.fillStyle = '#00ff88';
+    ctx.fillStyle   = '#00ff88';
     ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth   = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, -9); ctx.lineTo(5, 6); ctx.lineTo(0, 3); ctx.lineTo(-5, 6);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
+    ctx.moveTo(0, -11); ctx.lineTo(6, 7); ctx.lineTo(0, 4); ctx.lineTo(-6, 7);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // Dot at player feet
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
+
+    // ── Legend ───────────────────────────────────────────────────────────────
+    const legendItems = [
+      { color: '#00ff88', label: 'You' },
+      { color: '#ff8800', label: 'Ally' },
+      { color: '#ef4444', label: 'Enemy' },
+      { color: '#ffffff', label: 'Weapon' },
+      { color: '#22ee66', label: 'Medkit' },
+    ];
+    ctx.font = '10px "Segoe UI", Arial';
+    ctx.textAlign = 'left';
+    const lx = 8, ly = H - 8 - legendItems.length * 14;
+    legendItems.forEach(({ color, label }, i) => {
+      const iy = ly + i * 14;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(lx - 2, iy - 9, 70, 12);
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(lx + 4, iy - 3, 4, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#e0e0e0';
+      ctx.fillText(label, lx + 12, iy);
+    });
   }
 
   // ── Inventory Panel (Tab) ────────────────────────────────────────────────
@@ -965,6 +1085,8 @@ class Game {
           this.net.sendState(this.player.getPosition(), this.player.getYaw());
         }
       }
+
+      if (this._mapOpen) this._drawMap();
 
       this.renderer.render(this.scene, this.camera);
     };

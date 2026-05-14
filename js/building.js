@@ -242,7 +242,8 @@ export class BuildingSystem {
     for (const piece of this.pieces) {
       const pos  = piece.root.position;
       const rotY = piece.root.rotation.y;
-      const cos  = Math.cos(-rotY), sin = Math.sin(-rotY);
+      // World→local: inverse of the piece's Y rotation (Ry(-rotY)).
+      const cos  = Math.cos(rotY), sin = Math.sin(rotY);
       const dx   = wx - pos.x,  dz = wz - pos.z;
       const lx   = cos * dx - sin * dz;
       const lz   = sin * dx + cos * dz;
@@ -254,8 +255,9 @@ export class BuildingSystem {
         }
       } else if (piece.type === 'ramp') {
         if (Math.abs(lx) <= half && lz >= -half && lz <= half) {
-          // Surface rises from y=0 at z=+half to y=GRID at z=-half
-          const surfH = pos.y + (half - lz);
+          // Surface rises from y=0 at local z=-half to y=GRID at local z=+half,
+          // matching the mesh tilt (-45° about X lifts the +Z edge).
+          const surfH = pos.y + (half + lz);
           // Only snap onto ramp when player feet are within 0.5 units of the surface
           // (prevents invisible-bump when jumping up toward it from outside)
           if (playerY >= surfH - 0.5) maxH = Math.max(maxH, surfH);
@@ -273,7 +275,9 @@ export class BuildingSystem {
     const halfT = 0.16;       // half-thickness
 
     for (const piece of this.pieces) {
-      if (piece.type !== 'wall' && piece.type !== 'ramp') continue;
+      // Ramps are walkable surfaces (handled by getHeightAt), not solid walls —
+      // giving them a horizontal push ejects the player sideways off the slope.
+      if (piece.type !== 'wall') continue;
 
       const pos  = piece.root.position;
       const rotY = piece.root.rotation.y;
@@ -285,15 +289,7 @@ export class BuildingSystem {
       const lx  = cos * dx - sin * dz;
       const lz  = sin * dx + cos * dz;
 
-      let bx, bz; // half-extents for this piece type
-      if (piece.type === 'wall') {
-        bx = half; bz = halfT;
-      } else {
-        // Ramp: full tile footprint, but skip push when player is on the slope surface
-        bx = half; bz = half;
-        const surfH = pos.y + (half - lz);
-        if (wy >= surfH - 0.5 && wy <= surfH + 2.5) continue;
-      }
+      const bx = half, bz = halfT;
 
       if (Math.abs(lx) > bx + radius || Math.abs(lz) > bz + radius) continue;
 
