@@ -7,6 +7,9 @@ const LOSE_RANGE     = DETECT_RANGE * 1.4;
 const MOVE_SPEED     = 4.8;
 const SHOOT_INTERVAL = 2.0;
 const PATROL_SPEED   = MOVE_SPEED * 0.38;
+const PREF_MIN       = 13;    // closer than this → back off
+const PREF_MAX       = 26;    // farther than this → close the gap
+const BURST_GAP      = 0.13;  // seconds between rounds within a burst
 
 const STATE = { PATROL: 0, CHASE: 1, ATTACK: 2, DEAD: 3 };
 
@@ -29,6 +32,10 @@ export class Enemy {
     this._strafeT   = Math.random() * 1.5;
     this._strafeDir = Math.random() > 0.5 ? 1 : -1;
     this._strafeVel = 0;
+    this._burstLeft = 0;                  // rounds left in the current burst
+    this._burstT    = 0;                  // gap timer between burst rounds
+    this._dmgMult   = 1;                  // wave/difficulty scaling hooks
+    this._spdMult   = 1;
 
     this._buildModel(position);
     this._buildHealthBar();
@@ -99,6 +106,14 @@ export class Enemy {
     rifleG.add(box(0.04, 0.04, 0.32, 0x111111, 0, 0.04, -0.50)); // barrel
     rifleG.add(box(0.06, 0.20, 0.10, 0x2a2a2a, 0, -0.10, 0.20)); // grip
     this.root.add(rifleG);
+
+    // ── Polish details ──────────────────────────────────────────────────
+    this.root.add(box(0.40, 0.46, 0.16, 0x4a4a52, 0, 1.30, -0.27));  // backpack
+    this.root.add(box(0.46, 0.34, 0.06, 0x550000, 0, 1.34,  0.23));  // chest armor plate
+    this.root.add(box(0.18, 0.04, 0.18, 0xff3322, 0, 1.40,  0.27));  // plate status light
+    this.root.add(box(0.04, 0.22, 0.04, 0x111111, 0.16, 2.18, 0));   // helmet antenna
+    this._leftLeg.add(box(0.27, 0.14, 0.10, 0x1a1a22, 0, -0.20, 0.14));  // knee guard
+    this._rightLeg.add(box(0.27, 0.14, 0.10, 0x1a1a22, 0, -0.20, 0.14));
 
     // Store meshes for hit-flash
     this._meshes = [];
@@ -244,55 +259,83 @@ export class Enemy {
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist < stopDist) return;
     const nx = dx / dist, nz = dz / dist;
-    this.root.position.x += nx * speed * dt;
-    this.root.position.z += nz * speed * dt;
+    this.root.position.x += nx * speed * this._spdMult * dt;
+    this.root.position.z += nz * speed * this._spdMult * dt;
     this.root.rotation.y = Math.atan2(nx, nz);
   }
 
   _doAttack(dt, playerPos, dist, proj) {
     const dx  = playerPos.x - this.root.position.x;
     const dz  = playerPos.z - this.root.position.z;
-    const len = Math.sqrt(dx * dx + dz * dz);
-    this.root.rotation.y = Math.atan2(dx, dz);
+    const len = Math.sqrt(dx * dx + dz * dz) || 0.0001;
+    const nx  = dx / len, nz = dz / len;
+    const px  = -nz, pz = nx;            // perpendicular (strafe) unit vector
+    this.root.rotation.y = Math.atan2(nx, nz);
 
-    // Strafe perpendicular to the player vector
+    // Commit to a strafe direction for a while, then re-roll
     this._strafeT -= dt;
     if (this._strafeT <= 0) {
-      this._strafeT   = 0.7 + Math.random() * 1.5;
+      this._strafeT   = 0.9 + Math.random() * 1.6;
       this._strafeDir = Math.random() > 0.5 ? 1 : -1;
     }
-    if (dist > 7 && len > 0.01) {
-      const px = -dz / len, pz = dx / len; // perpendicular unit vector
-      const sSpeed = MOVE_SPEED * 0.5;
-      this.root.position.x += px * this._strafeDir * sSpeed * dt;
-      this.root.position.z += pz * this._strafeDir * sSpeed * dt;
-      this._strafeVel = sSpeed;
-    } else {
-      this._strafeVel *= 0.85;
+
+    // Range management — hold the preferred band, advance/retreat outside it
+    let radial = 0;
+    if (dist < PREF_MIN)      radial = -1;
+    else if (dist > PREF_MAX) radial =  1;
+    const speed = MOVE_SPEED * this._spdMult;
+
+    const composeMove = () => [
+      nx * radial * speed * 0.7 + px * this._strafeDir * speed * 0.55,
+      nz * radial * speed * 0.7 + pz * this._strafeDir * speed * 0.55,
+    ];
+    let [mx, mz] = composeMove();
+
+    // Don't strafe off into water / the storm's low ground — flip and recompose
+    const nextX = this.root.position.x + mx * dt * 4;
+    const nextZ = this.root.position.z + mz * dt * 4;
+    if (this.world.getTerrainHeight(nextX, nextZ) < 0.6) {
+      this._strafeDir *= -1;
+      [mx, mz] = composeMove();
     }
+    this.root.position.x += mx * dt;
+    this.root.position.z += mz * dt;
+    this._strafeVel = Math.sqrt(mx * mx + mz * mz);
 
     // Raise arms for aiming pose
     this._rightArm.rotation.x = THREE.MathUtils.lerp(this._rightArm.rotation.x, -0.52 + Math.sin(this._t * 2) * 0.025, dt * 8);
     this._leftArm.rotation.x  = THREE.MathUtils.lerp(this._leftArm.rotation.x,  -0.30, dt * 6);
 
-    this._shootT -= dt;
-    if (this._shootT <= 0 && proj) {
-      this._shootT = SHOOT_INTERVAL + (Math.random() - 0.5) * 0.6;
-      this._shoot(playerPos, proj);
+    // Burst fire — 2–3 rounds per trigger pull, then a longer cooldown
+    if (this._burstLeft > 0) {
+      this._burstT -= dt;
+      if (this._burstT <= 0) {
+        this._burstLeft--;
+        this._burstT = BURST_GAP;
+        this._shoot(playerPos, proj, dist);
+        if (this._burstLeft === 0) this._shootT = SHOOT_INTERVAL + (Math.random() - 0.5) * 0.6;
+      }
+    } else {
+      this._shootT -= dt;
+      if (this._shootT <= 0 && proj) {
+        this._burstLeft = 2 + (Math.random() < 0.5 ? 1 : 0);
+        this._burstT    = 0;
+      }
     }
   }
 
-  _shoot(targetPos, proj) {
+  _shoot(targetPos, proj, dist = 30) {
+    if (!proj) return;
     const origin = this.root.position.clone().add(new THREE.Vector3(0, 1.55, 0));
-    // Aim with slight inaccuracy
-    const spread = 1.8;
+    // Tighter aim up close, looser at range
+    const spread = THREE.MathUtils.clamp(dist * 0.045, 0.6, 2.4);
     const aim = new THREE.Vector3(
       targetPos.x + (Math.random() - 0.5) * spread,
       targetPos.y + 1.1 + (Math.random() - 0.5) * spread * 0.5,
       targetPos.z + (Math.random() - 0.5) * spread
     );
     const dir = aim.clone().sub(origin).normalize();
-    proj.spawn(origin, dir, { speed: 55, damage: 14, faction: 'enemy', range: 120 });
+    proj.spawn(origin, dir, { speed: 55, damage: 14 * this._dmgMult, faction: 'enemy', range: 120 });
   }
 
   takeDamage(amount) {
