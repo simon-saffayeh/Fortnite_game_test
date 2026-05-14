@@ -117,10 +117,14 @@ export class RemotePlayer {
   }
 
   update(dt, camera, canvas) {
-    // Interpolate to server position
-    this.root.position.lerp(this._targetPos, Math.min(1, dt * 22));
+    // Framerate-independent smoothing toward the latest server state.
+    // 1 - exp(-k*dt) eases identically regardless of frame rate, so remote
+    // players don't snap on fast frames or crawl/rubber-band on slow ones.
+    const posA = 1 - Math.exp(-16 * dt);
+    const yawA = 1 - Math.exp(-14 * dt);
+    this.root.position.lerp(this._targetPos, posA);
     this.root.rotation.y = THREE.MathUtils.lerp(
-      this.root.rotation.y, this._targetYaw, Math.min(1, dt * 18)
+      this.root.rotation.y, this._targetYaw, yawA
     );
 
     // Health bar facing camera

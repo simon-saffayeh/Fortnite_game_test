@@ -219,10 +219,10 @@ class Game {
 
   _setupRenderer() {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.shadowMap.enabled   = true;
-    this.renderer.shadowMap.type      = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type      = THREE.PCFShadowMap;
     this.renderer.toneMapping         = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure  = 1.1;
     this.renderer.outputColorSpace    = THREE.SRGBColorSpace;
@@ -1081,7 +1081,7 @@ class Game {
         this.net.update(dt, this.camera, this.canvas);
         this._netTimer -= dt;
         if (this._netTimer <= 0) {
-          this._netTimer = 0.05;
+          this._netTimer = 0.033;
           this.net.sendState(this.player.getPosition(), this.player.getYaw());
         }
       }

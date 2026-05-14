@@ -16,7 +16,7 @@ export class ParticleSystem {
   }
 
   _buildAmbientDust() {
-    const count = 800;
+    const count = 350;
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
     const colors    = new Float32Array(count * 3);

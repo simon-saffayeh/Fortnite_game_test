@@ -251,13 +251,13 @@ export class World {
     const sun = new THREE.DirectionalLight(0xffe0a0, 2.2);
     sun.position.set(200, 400, -300);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 900;
-    sun.shadow.camera.left = -250;
-    sun.shadow.camera.right = 250;
-    sun.shadow.camera.top = 250;
-    sun.shadow.camera.bottom = -250;
+    sun.shadow.camera.far = 750;
+    sun.shadow.camera.left = -170;
+    sun.shadow.camera.right = 170;
+    sun.shadow.camera.top = 170;
+    sun.shadow.camera.bottom = -170;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
 
