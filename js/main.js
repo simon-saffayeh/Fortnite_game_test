@@ -14,6 +14,7 @@ import { ScreenShake, MuzzleFlash, DamageNumbers, DirectionalDamage, HitMarker }
 import { NetworkManager, MP_SPAWNS } from './multiplayer.js';
 import { BuildingSystem } from './building.js';
 import { ZombieWaveManager } from './zombie.js';
+import { AudioManager } from './audio.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -302,6 +303,10 @@ class Game {
     this.dirDmg  = new DirectionalDamage();
     this.hitMark = new HitMarker();
 
+    // ── Audio ─────────────────────────────────────────────────────────
+    this.audio = new AudioManager();
+    await this.audio.init();
+
     // ── Building ──────────────────────────────────────────────────────
     if (this.buildEnabled) {
       this.building = new BuildingSystem(this.scene, this.world);
@@ -509,6 +514,10 @@ class Game {
         const orig = new THREE.Vector3(...msg.orig);
         const dir  = new THREE.Vector3(...msg.dir);
         this.projectiles.spawn(orig, dir, { speed: 180, damage: 0, faction: 'remote', range: 300 });
+        if (this.audio && msg.weapon) {
+          const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
+          this.audio.playAt(msg.weapon, orig, this.player.getPosition(), right);
+        }
       };
 
       // When we hit a remote player — track who we last hit for kill credit
@@ -544,6 +553,7 @@ class Game {
 
   _setupEvents() {
     this.canvas.addEventListener('click', () => {
+      this.audio?.resume();
       if (!document.pointerLockElement) this.canvas.requestPointerLock();
     });
 
@@ -645,8 +655,11 @@ class Game {
       });
     }
 
+    // Local gunshot audio — one shot per bullet (semi- and full-auto alike)
+    this.audio?.playLocal(weapon.def.id);
+
     // Broadcast shot to other players
-    if (this.net) this.net.sendShoot(origin, camDir);
+    if (this.net) this.net.sendShoot(origin, camDir, weapon.def.id);
 
     const muzzlePos = origin.clone().addScaledVector(camDir, 1.2);
     this.muzzle.flash(muzzlePos, 3.5);
