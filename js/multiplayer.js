@@ -118,16 +118,22 @@ export class RemotePlayer {
     if (hud) hud.appendChild(this._tag);
   }
 
-  setTargetState(pos, yaw, phase) {
+  setTargetState(pos, yaw, phase, health) {
     this._targetPos.set(pos[0], pos[1], pos[2]);
     this._targetYaw = yaw;
-    if (phase !== undefined) this.phase = phase;
+    if (phase !== undefined)  this.phase  = phase;
+    // Authoritative health from victim — overrides local prediction
+    if (health !== undefined && !this.dead) this.health = health;
   }
 
   takeDamage(amount) {
     if (this.dead) return;
     this.health = Math.max(0, this.health - amount);
-    if (this.health <= 0) this.die();
+    // Don't trigger death from local prediction — the victim has shield we
+    // can't see, so our health calc can be wrong. Death arrives authoritatively
+    // via the server's `death` message; killing locally would freeze the body
+    // and make bullets phase through a still-alive enemy (projectile.js skips
+    // rp.dead targets), creating an unkillable ghost.
   }
 
   die() {
@@ -235,7 +241,7 @@ export class NetworkManager {
   setName(name)          { this.myName = name; this.send({ type: 'setName', name }); }
   setReady(ready)        { this.send({ type: 'ready', value: ready }); }
   startGame()            { this.send({ type: 'startGame' }); }
-  sendState(pos, yaw, phase = 3) { this.send({ type: 'state', pos: [pos.x, pos.y, pos.z], yaw, phase }); }
+  sendState(pos, yaw, phase = 3, health = 100) { this.send({ type: 'state', pos: [pos.x, pos.y, pos.z], yaw, phase, health }); }
   sendShoot(orig, dir, weapon) { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z], weapon }); }
   sendHit(targetId, dmg) { this.send({ type: 'hit', targetId, damage: dmg }); }
   sendDeath()            { this.send({ type: 'death' }); }
@@ -293,7 +299,7 @@ export class NetworkManager {
 
       case 'state':
         if (this.remotePlayers.has(msg.id)) {
-          this.remotePlayers.get(msg.id).setTargetState(msg.pos, msg.yaw, msg.phase);
+          this.remotePlayers.get(msg.id).setTargetState(msg.pos, msg.yaw, msg.phase, msg.health);
         }
         if (this.onRemoteState) this.onRemoteState(msg);
         break;

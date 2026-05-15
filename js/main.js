@@ -1103,7 +1103,7 @@ class Game {
           this._netTimer -= dt;
           if (this._netTimer <= 0) {
             this._netTimer = 0.033;
-            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt());
+            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt(), this.player.health);
           }
         }
         this.particles.update(dt);
@@ -1149,7 +1149,7 @@ class Game {
         this._netTimer -= dt;
         if (this._netTimer <= 0) {
           this._netTimer = 0.033;
-          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3);
+          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3, this.player.health);
         }
       }
 
