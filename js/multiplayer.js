@@ -23,11 +23,13 @@ export class RemotePlayer {
     this.scene  = scene;
     this.dead   = false;
     this.health = 100;
+    this.phase  = 3;   // 0 bus · 1 skydive · 2 chute · 3 playing
 
     this._targetPos = new THREE.Vector3();
     this._targetYaw = 0;
 
     this._buildModel();
+    this._buildParachute();
     this._buildNameTag();
   }
 
@@ -86,6 +88,28 @@ export class RemotePlayer {
     this._hpBg = hpBg;
   }
 
+  _buildParachute() {
+    const chute = new THREE.Group();
+    const canopy = new THREE.Mesh(
+      new THREE.SphereGeometry(2.6, 16, 9, 0, Math.PI * 2, 0, Math.PI * 0.5),
+      new THREE.MeshLambertMaterial({ color: 0xcc4433, side: THREE.DoubleSide })
+    );
+    canopy.position.y = 4.4;
+    chute.add(canopy);
+    const lm = new THREE.LineBasicMaterial({ color: 0x222222 });
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const geo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(Math.cos(a) * 2.3, 4.3, Math.sin(a) * 2.3),
+        new THREE.Vector3(0, 1.9, 0),
+      ]);
+      chute.add(new THREE.Line(geo, lm));
+    }
+    chute.visible = false;
+    this.root.add(chute);
+    this._chute = chute;
+  }
+
   _buildNameTag() {
     this._tag = document.createElement('div');
     this._tag.className = 'remote-player-tag';
@@ -94,9 +118,10 @@ export class RemotePlayer {
     if (hud) hud.appendChild(this._tag);
   }
 
-  setTargetState(pos, yaw) {
+  setTargetState(pos, yaw, phase) {
     this._targetPos.set(pos[0], pos[1], pos[2]);
     this._targetYaw = yaw;
+    if (phase !== undefined) this.phase = phase;
   }
 
   takeDamage(amount) {
@@ -120,12 +145,17 @@ export class RemotePlayer {
     // Framerate-independent smoothing toward the latest server state.
     // 1 - exp(-k*dt) eases identically regardless of frame rate, so remote
     // players don't snap on fast frames or crawl/rubber-band on slow ones.
-    const posA = 1 - Math.exp(-16 * dt);
+    // Mid-air phases move fast — snap harder so skydivers don't rubber-band.
+    const airborne = this.phase === 1 || this.phase === 2;
+    const posA = 1 - Math.exp((airborne ? -26 : -16) * dt);
     const yawA = 1 - Math.exp(-14 * dt);
     this.root.position.lerp(this._targetPos, posA);
     this.root.rotation.y = THREE.MathUtils.lerp(
       this.root.rotation.y, this._targetYaw, yawA
     );
+
+    // Parachute is visible only during the chute phase
+    if (this._chute) this._chute.visible = this.phase === 2 && !this.dead;
 
     // Health bar facing camera
     if (camera) {
@@ -168,6 +198,7 @@ export class NetworkManager {
     this.remotePlayers  = new Map(); // id → RemotePlayer
     this._scene         = null;
     this._killCounts    = new Map(); // id → kills
+    this.gameStartTime  = null;      // performance.now() when gameStart arrived
 
     // Callbacks wired by Menu / Game
     this.onWelcome      = null;
@@ -204,7 +235,7 @@ export class NetworkManager {
   setName(name)          { this.myName = name; this.send({ type: 'setName', name }); }
   setReady(ready)        { this.send({ type: 'ready', value: ready }); }
   startGame()            { this.send({ type: 'startGame' }); }
-  sendState(pos, yaw)    { this.send({ type: 'state', pos: [pos.x, pos.y, pos.z], yaw }); }
+  sendState(pos, yaw, phase = 3) { this.send({ type: 'state', pos: [pos.x, pos.y, pos.z], yaw, phase }); }
   sendShoot(orig, dir, weapon) { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z], weapon }); }
   sendHit(targetId, dmg) { this.send({ type: 'hit', targetId, damage: dmg }); }
   sendDeath()            { this.send({ type: 'death' }); }
@@ -254,12 +285,15 @@ export class NetworkManager {
         break;
 
       case 'gameStart':
-        if (this.onGameStart) this.onGameStart();
+        // Anchor the shared storm clock — gameStart is broadcast to every
+        // client at once, so this moment is the same for everyone (±latency).
+        this.gameStartTime = performance.now();
+        if (this.onGameStart) this.onGameStart(msg);
         break;
 
       case 'state':
         if (this.remotePlayers.has(msg.id)) {
-          this.remotePlayers.get(msg.id).setTargetState(msg.pos, msg.yaw);
+          this.remotePlayers.get(msg.id).setTargetState(msg.pos, msg.yaw, msg.phase);
         }
         if (this.onRemoteState) this.onRemoteState(msg);
         break;

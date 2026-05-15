@@ -131,6 +131,14 @@ export class HUD {
       return;
     }
     const info = this.storm.getInfo();
+
+    if (info.state === 'pending') {
+      this._stormPhaseEl.textContent = 'STORM INCOMING';
+      this._stormStateEl.innerHTML = `Activates in <span id="storm-timer">${info.timeLeft}</span>s`;
+      this._stormWarn.style.display = 'none';
+      return;
+    }
+
     this._stormPhaseEl.textContent = `STORM PHASE ${info.phase}`;
 
     if (info.state === 'waiting') {
@@ -446,15 +454,17 @@ export class HUD {
       y: (wz - pp.z) * mmSc + SIZE / 2,
     });
 
-    // Storm circle
+    // Storm circle (hidden during the pre-bus grace period)
     if (this.storm) {
       const info = this.storm.getInfo();
-      const sr   = info.radius * mmSc;
-      const c    = toMM(info.center.x, info.center.z);
-      ctx.strokeStyle = 'rgba(100,80,255,0.9)';
-      ctx.lineWidth   = 2;
-      ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = 'rgba(80,40,220,0.06)'; ctx.fill();
+      if (info.state !== 'pending') {
+        const sr = info.radius * mmSc;
+        const c  = toMM(info.center.x, info.center.z);
+        ctx.strokeStyle = 'rgba(100,80,255,0.9)';
+        ctx.lineWidth   = 2;
+        ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
+        ctx.fillStyle = 'rgba(80,40,220,0.06)'; ctx.fill();
+      }
     }
 
 

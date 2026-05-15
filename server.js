@@ -164,6 +164,15 @@ server.on('upgrade', (req, socket) => {
   socket.on('error', () => disconnect(id));
 });
 
+// Random battle-bus route, shared by every client so the bus ride is in sync.
+function makeBusPath() {
+  return {
+    angle:   Math.random() * Math.PI * 2,
+    offsetX: (Math.random() - 0.5) * 180,
+    offsetZ: (Math.random() - 0.5) * 180,
+  };
+}
+
 function handleMessage(senderId, msg) {
   const p = players.get(senderId);
   if (!p) return;
@@ -186,7 +195,7 @@ function handleMessage(senderId, msg) {
         return;
       }
       gameActive = true;
-      broadcast({ type: 'gameStart' });
+      broadcast({ type: 'gameStart', busPath: makeBusPath() });
       console.log('[!] Game started');
       break;
 

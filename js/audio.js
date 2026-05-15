@@ -14,9 +14,12 @@ const SOUND_FILES = {
   rocketLauncher:  'sounds/semi_auto_shots/rocket_launcher_shot.wav',
   // Nuke plays on landing, not on fire — keyed separately from bombLauncher
   nukeExplosion:   'sounds/semi_auto_shots/nuke_launcher.wav',
+  huntingRifle:    'sounds/semi_auto_shots/hunting_rifle_shot.wav',
+  phaseRifle:      'sounds/semi_auto_shots/phase_rifle_shot.wav',
   // Full-auto — same per-shot path, fired once per bullet
   ar:              'sounds/full_auto_sounds/assault_rifle_shot.wav',
   heavyAR:         'sounds/full_auto_sounds/assault_rifle_shot.wav',
+  dualPistols:     'sounds/full_auto_sounds/assault_rifle_shot.wav',
   smg:             'sounds/full_auto_sounds/smg_shot.wav',
   minigun:         'sounds/full_auto_sounds/smg_shot.wav',
 };
@@ -30,8 +33,11 @@ const VOLUME_WEIGHTS = {
   sniper:         1.0,
   rocketLauncher: 1.0,
   nukeExplosion:  1.8,
+  huntingRifle:   1.0,
+  phaseRifle:     1.0,
   ar:             1.0,
   heavyAR:        1.0,
+  dualPistols:    1.0,
   smg:            1.0,
   minigun:        1.0,
 };

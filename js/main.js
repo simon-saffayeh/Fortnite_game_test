@@ -15,6 +15,7 @@ import { NetworkManager, MP_SPAWNS } from './multiplayer.js';
 import { BuildingSystem } from './building.js';
 import { ZombieWaveManager } from './zombie.js';
 import { AudioManager } from './audio.js';
+import { DeployController } from './skydive.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -140,12 +141,13 @@ class Menu {
       this._setStatus('You are now the host!');
     };
 
-    this._net.onGameStart = () => {
+    this._net.onGameStart = (msg) => {
       const buildEnabled   = this._buildEnabled();
       const testingEnabled = this._testingEnabled();
       document.getElementById('lobby-screen').classList.add('hidden');
       document.getElementById('loading-screen').classList.remove('hidden');
-      setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled, this._music), 120);
+      const busPath = msg?.busPath ?? null;
+      setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled, this._music, busPath), 120);
     };
 
     document.getElementById('lobby-screen').classList.remove('hidden');
@@ -197,12 +199,14 @@ class Menu {
 
 // ── Game ──────────────────────────────────────────────────────────────────────
 class Game {
-  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false, lobbyMusic = null) {
+  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false, lobbyMusic = null, busPath = null) {
     this.mode           = mode;
     this.net            = net;
     this.buildEnabled   = buildEnabled;
     this.testingEnabled = testingEnabled;
     this._lobbyMusic    = lobbyMusic;
+    this._busPath       = busPath;
+    this.deploy         = null;
     this.canvas = document.getElementById('game-canvas');
     this.clock  = new THREE.Clock();
     this.running = false;
@@ -314,6 +318,11 @@ class Game {
     step(this.mode === 'solo' ? 'Deploying enemies…' : 'Connecting players…', 75);
 
     this.storm   = this.mode === 'zombie' ? null : new Storm(this.scene);
+    // Multiplayer: anchor the storm clock to the shared game-start moment so
+    // every client sees the same radius/phase regardless of when they land.
+    if (this.storm && this.net?.gameStartTime != null) {
+      this.storm.setClockStart(this.net.gameStartTime);
+    }
     this.shake   = new ScreenShake();
     this.muzzle  = new MuzzleFlash(this.scene);
     this.dmgNums = new DamageNumbers();
@@ -541,7 +550,15 @@ class Game {
       this.hitMark.hit(justKilled);
     };
 
-    // ── 8. Ready ──────────────────────────────────────────────────────
+    // ── 8. Battle bus deploy ──────────────────────────────────────────
+    // Match starts mid-air: ride the bus, jump, skydive, parachute in.
+    // While deploy is active the loop skips normal player/enemy/storm ticks.
+    this.storm?.update(0, this.player, false); // set storm-wall mesh to its real scale
+    this.deploy = new DeployController(
+      this.scene, this.world, this.player, this.camera, this._busPath
+    );
+
+    // ── 9. Ready ──────────────────────────────────────────────────────
     step('Ready!', 100);
     await frame(); // let browser paint Ready! before the fade starts
 
@@ -562,6 +579,7 @@ class Game {
 
     window.addEventListener('keydown', e => {
       if (!this.running) return;
+      if (this.deploy?.active) return;  // no gameplay keys during the bus/skydive
 
       // Inventory panel
       if (e.code === 'Tab') { e.preventDefault(); this._toggleInvPanel(); return; }
@@ -610,6 +628,7 @@ class Game {
 
   // ── Shooting ──────────────────────────────────────────────────────────────
   _tryShoot() {
+    if (this.deploy?.active) { this._prevMouseDown = this.player.mouseDown; return; }
     if (!document.pointerLockElement) {
       this._prevMouseDown = this.player.mouseDown;
       return;
@@ -771,41 +790,53 @@ class Game {
       y: (wz / S + 0.5) * H,
     });
 
-    // ── Storm circle ────────────────────────────────────────────────────────
+    // ── Storm circle (hidden while the storm is still pending) ─────────────
     if (this.storm) {
       const info = this.storm.getInfo();
-      const sr   = (info.radius / S) * W;
-      const c    = toCanvas(info.center.x, info.center.z);
+      if (info.state === 'pending') {
+        ctx.font = 'bold 12px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(180,140,255,0.95)';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        const msg = `Storm activates in ${info.timeLeft}s`;
+        ctx.strokeText(msg, W / 2, 18);
+        ctx.fillText(msg, W / 2, 18);
+      } else {
+        const sr = (info.radius / S) * W;
+        const c  = toCanvas(info.center.x, info.center.z);
 
-      // Tinted fill outside storm wall
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, W, H);
-      ctx.arc(c.x, c.y, sr, 0, Math.PI * 2, true); // counter-clockwise = subtract
-      ctx.fillStyle = 'rgba(60,20,180,0.32)';
-      ctx.fill('evenodd');
-      ctx.restore();
+        // Tinted fill outside storm wall
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, W, H);
+        ctx.arc(c.x, c.y, sr, 0, Math.PI * 2, true); // counter-clockwise = subtract
+        ctx.fillStyle = 'rgba(60,20,180,0.32)';
+        ctx.fill('evenodd');
+        ctx.restore();
 
-      // Storm wall ring
-      ctx.strokeStyle = 'rgba(110,80,255,0.95)';
-      ctx.lineWidth   = 3;
-      ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = 'rgba(180,140,255,0.4)';
-      ctx.lineWidth   = 7;
-      ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
+        // Storm wall ring
+        ctx.strokeStyle = 'rgba(110,80,255,0.95)';
+        ctx.lineWidth   = 3;
+        ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
+        ctx.strokeStyle = 'rgba(180,140,255,0.4)';
+        ctx.lineWidth   = 7;
+        ctx.beginPath(); ctx.arc(c.x, c.y, sr, 0, Math.PI * 2); ctx.stroke();
 
-      // Phase label above storm ring
-      const stateStr = info.state === 'waiting'   ? `Phase ${info.phase} — moves in ${info.timeLeft}s`
-                     : info.state === 'shrinking'  ? `Phase ${info.phase} — closing ${info.timeLeft}s`
-                     :                               'Final Zone';
-      ctx.font = 'bold 12px "Segoe UI", Arial';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(180,140,255,0.95)';
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 3;
-      ctx.lineJoin = 'round';
-      ctx.strokeText(stateStr, W / 2, 18);
-      ctx.fillText(stateStr, W / 2, 18);
+        // Phase label above storm ring
+        const stateStr = info.state === 'waiting'   ? `Phase ${info.phase} — moves in ${info.timeLeft}s`
+                       : info.state === 'shrinking'  ? `Phase ${info.phase} — closing ${info.timeLeft}s`
+                       :                               'Final Zone';
+        ctx.font = 'bold 12px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(180,140,255,0.95)';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(stateStr, W / 2, 18);
+        ctx.fillText(stateStr, W / 2, 18);
+      }
     }
 
     // ── POI labels ───────────────────────────────────────────────────────────
@@ -1060,6 +1091,27 @@ class Game {
       const dt = Math.min(this.clock.getDelta(), 0.05);
       if (!this.running) return;
 
+      // ── Deploy phase: battle bus / skydive / parachute ────────────
+      // The deploy controller owns the player + camera; enemies, storm
+      // and building stay frozen until everyone has landed.
+      if (this.deploy && this.deploy.active) {
+        this.deploy.update(dt);
+        this.storm?.update(dt, this.player, false); // clock advances, no damage
+        this.hud.update(dt);                        // keep storm timer / minimap live
+        if (this.net) {
+          this.net.update(dt, this.camera, this.canvas);
+          this._netTimer -= dt;
+          if (this._netTimer <= 0) {
+            this._netTimer = 0.033;
+            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt());
+          }
+        }
+        this.particles.update(dt);
+        this.shake.update(dt);
+        this.renderer.render(this.scene, this.camera);
+        return;
+      }
+
       this._tryShoot();
       this._updateADS();
 
@@ -1097,7 +1149,7 @@ class Game {
         this._netTimer -= dt;
         if (this._netTimer <= 0) {
           this._netTimer = 0.033;
-          this.net.sendState(this.player.getPosition(), this.player.getYaw());
+          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3);
         }
       }
 

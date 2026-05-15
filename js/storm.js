@@ -11,6 +11,9 @@ const PHASES = [
 const START_RADIUS = 340;
 const CENTER       = new THREE.Vector3(18, 0, -12);
 const WALL_HEIGHT  = 350;
+// Delay before the storm visually appears or deals damage — covers the
+// battle bus's flight across the map so it doesn't pass through the wall.
+const STORM_DELAY  = 12;
 
 export class Storm {
   constructor(scene) {
@@ -18,14 +21,66 @@ export class Storm {
     this.currentRadius = START_RADIUS;
     this.center        = CENTER.clone();
     this.phaseIndex    = 0;
-    this.phaseState    = 'waiting'; // 'waiting' | 'shrinking'
+    this.phaseState    = 'waiting'; // 'waiting' | 'shrinking' | 'done'
     this.phaseTimer    = PHASES[0].waitTime;
     this.playerOutside = false;
     this._dmgTimer     = 0;
-    this._shrinkFrom   = START_RADIUS;
+    this._elapsed      = 0;         // seconds since the storm clock started
+    this._clockStart   = null;      // performance.now() anchor (multiplayer)
 
     this._buildVisual();
     this._buildOverlays();
+  }
+
+  // Anchor the storm clock to a shared performance.now() timestamp. In
+  // multiplayer every client passes the same game-start moment, so _elapsed is
+  // recomputed from it each frame — no accumulation drift, no dependence on
+  // per-machine load time. Solo leaves this null and just accumulates dt.
+  setClockStart(perfTimestamp) {
+    this._clockStart = perfTimestamp;
+    this._elapsed = Math.max(0, (performance.now() - perfTimestamp) / 1000);
+    this._recompute();
+  }
+
+  // Derive phase / radius / countdown purely from _elapsed — makes the storm
+  // state a pure function of time, so it's identical wherever the clock matches.
+  _recompute() {
+    // Initial grace period: storm is invisible and inert while the bus
+    // crosses the map. Reports as 'pending' so HUD/map can hide it.
+    if (this._elapsed < STORM_DELAY) {
+      this.phaseIndex    = 0;
+      this.phaseState    = 'pending';
+      this.currentRadius = START_RADIUS;
+      this.phaseTimer    = STORM_DELAY - this._elapsed;
+      return;
+    }
+
+    let t = this._elapsed - STORM_DELAY;
+    let radiusFrom = START_RADIUS;
+    for (let i = 0; i < PHASES.length; i++) {
+      const ph = PHASES[i];
+      if (t < ph.waitTime) {
+        this.phaseIndex = i;
+        this.phaseState = 'waiting';
+        this.currentRadius = radiusFrom;
+        this.phaseTimer = ph.waitTime - t;
+        return;
+      }
+      t -= ph.waitTime;
+      if (t < ph.shrinkTime) {
+        this.phaseIndex = i;
+        this.phaseState = 'shrinking';
+        this.currentRadius = THREE.MathUtils.lerp(radiusFrom, ph.endRadius, t / ph.shrinkTime);
+        this.phaseTimer = ph.shrinkTime - t;
+        return;
+      }
+      t -= ph.shrinkTime;
+      radiusFrom = ph.endRadius;
+    }
+    this.phaseIndex    = PHASES.length - 1;
+    this.phaseState    = 'done';
+    this.currentRadius = PHASES[PHASES.length - 1].endRadius;
+    this.phaseTimer    = 9999;
   }
 
   _buildVisual() {
@@ -98,37 +153,30 @@ export class Storm {
     document.body.appendChild(this._dmgFlash);
   }
 
-  update(dt, player) {
-    // ── Radius logic ──────────────────────────────────────────────────────
-    this.phaseTimer -= dt;
-
-    if (this.phaseTimer <= 0) {
-      if (this.phaseState === 'waiting') {
-        this.phaseState  = 'shrinking';
-        this._shrinkFrom = this.currentRadius;
-        this.phaseTimer  = PHASES[this.phaseIndex].shrinkTime;
-      } else {
-        // finished shrinking
-        this.currentRadius = PHASES[this.phaseIndex].endRadius;
-        this.phaseIndex++;
-        if (this.phaseIndex < PHASES.length) {
-          this.phaseState = 'waiting';
-          this.phaseTimer = PHASES[this.phaseIndex].waitTime;
-        } else {
-          this.phaseState = 'done';
-          this.phaseTimer = 9999;
-        }
-      }
+  // applyDamage is false during the deploy phase — the storm clock keeps
+  // advancing (so it stays synced) but airborne players take no damage.
+  update(dt, player, applyDamage = true) {
+    if (this._clockStart != null) {
+      this._elapsed = Math.max(0, (performance.now() - this._clockStart) / 1000);
+    } else {
+      this._elapsed += dt;
     }
+    this._recompute();
 
-    if (this.phaseState === 'shrinking' && this.phaseIndex < PHASES.length) {
-      const total = PHASES[this.phaseIndex].shrinkTime;
-      const t = 1 - this.phaseTimer / total;
-      this.currentRadius = THREE.MathUtils.lerp(
-        this._shrinkFrom,
-        PHASES[this.phaseIndex].endRadius,
-        Math.min(1, t)
-      );
+    // ── Visibility: hidden during the pre-storm grace period ──────────────
+    const pending = this.phaseState === 'pending';
+    const showWall = !pending;
+    this._wall.visible = showWall;
+    this._glow.visible = showWall;
+    this._cap.visible  = showWall;
+    for (const f of this._flashes) f.mesh.visible = showWall;
+
+    if (pending) {
+      this._outsideOverlay.style.opacity = '0';
+      this._dmgFlash.style.opacity = '0';
+      this._dmgTimer = 0;
+      this.playerOutside = false;
+      return;
     }
 
     // ── Scale meshes ──────────────────────────────────────────────────────
@@ -150,7 +198,7 @@ export class Storm {
     const dz = pp.z - this.center.z;
     this.playerOutside = Math.sqrt(dx * dx + dz * dz) > this.currentRadius;
 
-    if (this.playerOutside) {
+    if (this.playerOutside && applyDamage) {
       this._outsideOverlay.style.opacity = '1';
       this._dmgTimer += dt;
       const pulseAmt = 0.3 + Math.sin(Date.now() * 0.005) * 0.25;
