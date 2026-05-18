@@ -8,7 +8,7 @@ const os     = require('os');
 
 const PORT       = 3000;
 const ROOT       = __dirname;
-const MAX_PLAYERS = 10;
+const MAX_PLAYERS = 20;
 
 const MIME = {
   '.html': 'text/html', '.js': 'application/javascript',
@@ -22,6 +22,14 @@ const MIME = {
 // ── Lobby state ───────────────────────────────────────────────────────────────
 const players   = new Map(); // id → { socket, name, ready, buf }
 let gameActive  = false;
+const inGameIds = new Set(); // ids that were present when the match started
+let gameStartedAt = 0;       // Date.now() of the most recent startGame — late
+                             // joiners use the elapsed value to anchor their
+                             // storm clock to the same wall-clock the in-game
+                             // players already started from.
+let worldSeed     = 0;       // 32-bit seed shared with every client so the
+                             // weapon-type-at-spawn-point roll is identical
+                             // across players. Re-rolled per match.
 let hostId      = null;
 let nextId      = 1;
 
@@ -123,6 +131,26 @@ server.on('upgrade', (req, socket) => {
     socket.destroy(); return;
   }
 
+  // Defensive sanitize: if any cached state outlasted the player it
+  // referred to (lost-close events, host crashed mid-broadcast, etc.),
+  // clear it now so the incoming connection lands in a clean lobby.
+  if (players.size === 0) {
+    if (gameActive) console.log('[~] Resetting stale gameActive (no players connected)');
+    gameActive = false;
+    inGameIds.clear();
+    hostId = null;
+  } else if (gameActive) {
+    // Are any in-game IDs still actually connected? If not, the previous
+    // round ended without a clean matchEnd — reopen the lobby.
+    let anyAlive = false;
+    for (const id of inGameIds) if (players.has(id)) { anyAlive = true; break; }
+    if (!anyAlive) {
+      console.log('[~] Resetting stale gameActive (no in-game player connected)');
+      gameActive = false;
+      inGameIds.clear();
+    }
+  }
+
   socket.write(
     'HTTP/1.1 101 Switching Protocols\r\n' +
     'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
@@ -134,15 +162,25 @@ server.on('upgrade', (req, socket) => {
 
   if (!hostId) hostId = id;
 
-  // Welcome: existing player list (before adding ourselves)
+  // Welcome: existing player list (before adding ourselves). `inGame` lets
+  // the lobby colour each row appropriately — late joiners see the running
+  // players tagged "IN GAME" while they wait or spectate.
+  // `matchElapsedMs` lets late spectators anchor their storm clock to the
+  // moment the match actually started (rather than fresh-from-zero).
   sendTo(socket, {
     type: 'welcome', id,
     isHost: id === hostId,
-    players: [...players.values()].map(p => ({ id: p.id, name: p.name, ready: p.ready })),
+    players: [...players.values()].map(p => ({
+      id: p.id, name: p.name, ready: p.ready, inGame: inGameIds.has(p.id),
+    })),
     gameActive,
+    inGameIds: [...inGameIds],
+    matchElapsedMs: gameActive ? (Date.now() - gameStartedAt) : 0,
+    worldSeed: gameActive ? worldSeed : 0,
   });
 
-  broadcast({ type: 'playerJoined', id, name: player.name }, id);
+  // New connections are never in-game (they arrived after startGame).
+  broadcast({ type: 'playerJoined', id, name: player.name, inGame: false }, id);
   players.set(id, player);
   console.log(`[+] Player ${id} joined  (${players.size}/${MAX_PLAYERS})`);
 
@@ -190,13 +228,38 @@ function handleMessage(senderId, msg) {
 
     case 'startGame':
       if (senderId !== hostId) return;
-      if (players.size < 2) {
-        sendTo(p.socket, { type: 'error', msg: 'Need at least 2 players.' });
-        return;
-      }
+      if (gameActive) return; // already running — late joiners can't trigger another
+      // Host may start alone — useful for testing and trivially a 1-player
+      // "match" the server simply broadcasts and the client renders.
       gameActive = true;
-      broadcast({ type: 'gameStart', busPath: makeBusPath() });
-      console.log('[!] Game started');
+      gameStartedAt = Date.now();
+      worldSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+      inGameIds.clear();
+      for (const pid of players.keys()) inGameIds.add(pid);
+      // matchMode is 'solo' or 'duo'. teams is a {playerId: teamId} map used
+      // only in duo. inGameIds tells late joiners (who arrive mid-broadcast)
+      // who's actually playing this round so their lobby can dim those rows.
+      // worldSeed makes weapon-type-at-spawn-point identical for every client.
+      broadcast({
+        type:      'gameStart',
+        busPath:   makeBusPath(),
+        matchMode: msg.matchMode ?? 'solo',
+        teams:     msg.teams     ?? {},
+        inGameIds: [...inGameIds],
+        worldSeed,
+      });
+      console.log(`[!] Game started (${msg.matchMode ?? 'solo'})`);
+      break;
+
+    case 'matchEnd':
+      // Any in-game client can declare match end (victory / spectator
+      // match-over). Resets gameActive so the lobby reopens for everyone,
+      // including any late joiners who connected mid-match.
+      if (!gameActive) return;
+      gameActive = false;
+      inGameIds.clear();
+      broadcast({ type: 'matchEnded' });
+      console.log('[!] Match ended');
       break;
 
     // Pure relay — forward with sender's id attached
@@ -205,6 +268,15 @@ function handleMessage(senderId, msg) {
     case 'hit':
     case 'death':
     case 'chat':
+    case 'supplyDropOpen':           // any client can open a drop
+    case 'weaponDropped':            // any client can drop their weapon
+      broadcast({ ...msg, id: senderId }, senderId);
+      break;
+
+    // Host-authoritative: only the host may seed new supply drops. Non-host
+    // attempts are silently dropped so a misbehaving client can't grief.
+    case 'supplyDropSpawn':
+      if (senderId !== hostId) return;
       broadcast({ ...msg, id: senderId }, senderId);
       break;
   }
@@ -213,8 +285,17 @@ function handleMessage(senderId, msg) {
 function disconnect(id) {
   if (!players.has(id)) return;
   players.delete(id);
+  inGameIds.delete(id);
   broadcast({ type: 'playerLeft', id });
   console.log(`[-] Player ${id} left    (${players.size}/${MAX_PLAYERS})`);
+
+  // If the last in-game player drops, the match is effectively over —
+  // reopen the lobby so any waiting late joiners can enter normally.
+  if (gameActive && inGameIds.size === 0) {
+    gameActive = false;
+    broadcast({ type: 'matchEnded' });
+    console.log('[!] Match ended (all in-game players left)');
+  }
 
   if (id === hostId) {
     hostId = players.size > 0 ? players.keys().next().value : null;

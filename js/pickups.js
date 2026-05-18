@@ -130,9 +130,9 @@ const SPAWN_LIST = [
   // Cedar Creek — main cabin SW and NW corners, clear of sofa/table cluster
   { id: 'medkit',    x:  95,  z:  -3.5 },
   { id: 'shield',    x:  95,  z:   3.5 },
-  // Fort Ironwatch — barracks north of bed cluster; armory (no furniture)
-  { id: 'bigmed',    x: -130, z:  67   },
-  { id: 'bigshield', x: -130, z:  33   },
+  // Frank's Jail — loot inside south-west cell and north-east cell
+  { id: 'bigmed',    x: -136, z:  41   },
+  { id: 'bigshield', x: -120, z:  59   },
   // Ancient Temple — open platform (no furniture)
   { id: 'shield',    x:  36,  z: -161  },
   // Military Compound — main bunker NE corner; secondary bunker NE corner
@@ -207,6 +207,17 @@ export class PickupManager {
     const h   = this.world.getTerrainHeight(worldPos.x, worldPos.z);
     const pos = new THREE.Vector3(worldPos.x, Math.max(worldPos.y - 0.3, h), worldPos.z);
     this.pickups.push(new HealthPickup(this.scene, def, pos));
+  }
+
+  /**
+   * Spawn a specific consumable at a world position. Used by supply drops
+   * (which want guaranteed Big Med / Big Shield / Stim rather than the
+   * random table). Accepts a def from DEFS or its id string.
+   */
+  spawnAt(idOrDef, worldPos) {
+    const def = (typeof idOrDef === 'string') ? DEFS[idOrDef] : idOrDef;
+    if (!def) return;
+    this.pickups.push(new HealthPickup(this.scene, def, worldPos.clone()));
   }
 
   /** Expose all uncollected pickups for minimap rendering. */

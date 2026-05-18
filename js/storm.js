@@ -29,6 +29,7 @@ export class Storm {
     this._clockStart   = null;      // performance.now() anchor (multiplayer)
 
     this._buildVisual();
+    this._buildRain();
     this._buildOverlays();
   }
 
@@ -96,18 +97,6 @@ export class Storm {
     this._wall.position.copy(this.center);
     this.scene.add(this._wall);
 
-    // Softer outer glow ring (slightly larger)
-    const glowGeo = new THREE.CylinderGeometry(1, 1, WALL_HEIGHT, 80, 1, true);
-    this._glow = new THREE.Mesh(glowGeo, new THREE.MeshBasicMaterial({
-      color: 0x8844ff,
-      transparent: true,
-      opacity: 0.14,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    }));
-    this._glow.position.copy(this.center);
-    this.scene.add(this._glow);
-
     // Storm ceiling disc (dark cloud cap)
     const capGeo = new THREE.CircleGeometry(1, 80);
     this._cap = new THREE.Mesh(capGeo, new THREE.MeshBasicMaterial({
@@ -132,6 +121,36 @@ export class Storm {
       this.scene.add(flash);
       this._flashes.push({ mesh: flash, timer: 0, interval: 1.5 + Math.random() * 3 });
     }
+  }
+
+  /**
+   * Build a Points-based rain field that follows the camera. Particles live
+   * in a 60×40×60 box around the camera (slanted by the wind), recycled when
+   * they fall below ground. Cheap — single draw call, 250 vertices.
+   * Visible only outside the storm circle (where the weather is "bad").
+   */
+  _buildRain() {
+    const N = 250;
+    const positions = new Float32Array(N * 3);
+    const velocities = new Float32Array(N);   // per-particle Y speed
+    for (let i = 0; i < N; i++) {
+      positions[i*3 + 0] = (Math.random() - 0.5) * 60;
+      positions[i*3 + 1] =  Math.random() * 40;
+      positions[i*3 + 2] = (Math.random() - 0.5) * 60;
+      velocities[i] = 35 + Math.random() * 15;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const mat = new THREE.PointsMaterial({
+      color: 0xaabbcc, size: 0.16,
+      transparent: true, opacity: 0.55,
+      depthWrite: false,
+    });
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;        // box is camera-relative; never cull
+    pts.visible = false;
+    this.scene.add(pts);
+    this._rain = { mesh: pts, geo, positions, velocities, count: N };
   }
 
   _buildOverlays() {
@@ -167,7 +186,6 @@ export class Storm {
     const pending = this.phaseState === 'pending';
     const showWall = !pending;
     this._wall.visible = showWall;
-    this._glow.visible = showWall;
     this._cap.visible  = showWall;
     for (const f of this._flashes) f.mesh.visible = showWall;
 
@@ -182,7 +200,6 @@ export class Storm {
     // ── Scale meshes ──────────────────────────────────────────────────────
     const r = this.currentRadius;
     this._wall.scale.set(r, 1, r);
-    this._glow.scale.set(r + 10, 1, r + 10);
     this._cap.scale.set(r, r, r);
 
     // Animate wall pulsing
@@ -194,9 +211,15 @@ export class Storm {
 
     // ── Player damage ─────────────────────────────────────────────────────
     const pp = player.getPosition();
+
     const dx = pp.x - this.center.x;
     const dz = pp.z - this.center.z;
     this.playerOutside = Math.sqrt(dx * dx + dz * dz) > this.currentRadius;
+
+    // Rain field — only when the local player is actually in the damage zone
+    // AND damage is being applied (suppresses rain during bus/skydive even
+    // though the storm clock keeps running). Box recentered each frame.
+    this._animateRain(dt, pp, this.playerOutside && applyDamage);
 
     if (this.playerOutside && applyDamage) {
       this._outsideOverlay.style.opacity = '1';
@@ -215,6 +238,39 @@ export class Storm {
       this._dmgFlash.style.opacity = '0';
       this._dmgTimer = 0;
     }
+  }
+
+  /**
+   * Update the rain Points. Box is camera-relative so we never need to
+   * frustum-cull or maintain global rain over the whole 800m map.
+   * Visibility tracks whether the player is outside the safe circle.
+   */
+  _animateRain(dt, playerPos, shouldShow) {
+    if (!this._rain) return;
+    this._rain.mesh.visible = !!shouldShow;
+    if (!shouldShow) return;
+    const pos = this._rain.positions;
+    const vel = this._rain.velocities;
+    const n   = this._rain.count;
+    // Slight horizontal wind for visual interest.
+    const windX = 4 * dt;
+    for (let i = 0; i < n; i++) {
+      const ix = i * 3;
+      pos[ix + 0] += windX;
+      pos[ix + 1] -= vel[i] * dt;
+      // Recycle when below ground or out of box bounds.
+      if (pos[ix + 1] < -1) {
+        pos[ix + 0] = (Math.random() - 0.5) * 60;
+        pos[ix + 1] =  20 + Math.random() * 20;
+        pos[ix + 2] = (Math.random() - 0.5) * 60;
+      } else if (pos[ix + 0] > 30) {
+        pos[ix + 0] = -30;
+      }
+    }
+    this._rain.geo.attributes.position.needsUpdate = true;
+    // Keep the rain box recentered on the player so particles always feel
+    // local. Y stays at player height for natural alignment.
+    this._rain.mesh.position.set(playerPos.x, playerPos.y, playerPos.z);
   }
 
   _animateFlashes(dt, radius) {

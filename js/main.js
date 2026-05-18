@@ -1,10 +1,14 @@
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass }from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass }     from 'three/addons/postprocessing/ShaderPass.js';
 import { World }             from './world.js';
 import { Player }            from './player.js';
 import { ThirdPersonCamera } from './camera.js';
 import { HUD }               from './ui.js';
 import { ParticleSystem }    from './particles.js';
-import { WeaponSystem, WeaponInstance, WEAPON_DEFS, buildGunModel } from './weapons.js';
+import { WeaponSystem, WeaponInstance, WeaponPickup, WEAPON_DEFS, buildGunModel } from './weapons.js';
 import { Inventory }         from './inventory.js';
 import { ProjectileSystem }  from './projectile.js';
 import { EnemyManager }      from './enemy.js';
@@ -16,6 +20,9 @@ import { BuildingSystem } from './building.js';
 import { ZombieWaveManager } from './zombie.js';
 import { AudioManager } from './audio.js';
 import { DeployController } from './skydive.js';
+import { SpectatorController, PHASE_SPECTATING } from './spectator.js';
+import { SupplyDropManager } from './supplyDrops.js';
+import { AmmoSystem, AMMO_VISUAL } from './ammo.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -44,6 +51,31 @@ class Menu {
     document.getElementById('btn-ready').addEventListener('click', () => this._toggleReady());
     document.getElementById('btn-start-game').addEventListener('click', () => this._requestStart());
     document.getElementById('btn-lobby-back').addEventListener('click', () => location.reload());
+
+    // Mode picker — tap-style buttons. Only the active button has the
+    // `.active` class; clicking another toggles state and re-renders teams.
+    for (const b of document.querySelectorAll('.lobby-mode-row .mode-btn')) {
+      b.addEventListener('click', () => {
+        if (!this._net?.isHost) return;
+        this._matchMode = b.dataset.mode;
+        for (const o of document.querySelectorAll('.lobby-mode-row .mode-btn')) {
+          o.classList.toggle('active', o === b);
+        }
+        this._renderTeams();
+      });
+    }
+
+    // Spectate button — late joiners click to drop into the running match
+    // as a spectator. Hidden until the lobby learns a match is active.
+    document.getElementById('btn-spectate').addEventListener('click', () => this._startSpectator());
+
+    // Host-only state for the team picker:
+    // - this._matchMode: 'solo' | 'duo'
+    // - this._teams: { playerId: teamId } only meaningful in duo
+    // - this._teamSelected: id of player chip the host is moving (click-to-swap)
+    this._matchMode    = 'solo';
+    this._teams        = {};
+    this._teamSelected = null;
 
     // Sensitivity slider
     const sensSlider = document.getElementById('sens-slider');
@@ -121,33 +153,65 @@ class Menu {
 
     // Wire lobby callbacks
     this._net.onWelcome = msg => {
-      this._net.players.set(msg.id, { id: msg.id, name: this._myName, ready: false });
+      this._net.players.set(msg.id, {
+        id: msg.id, name: this._myName, ready: false, inGame: false,
+      });
       this._net.setName(this._myName);
+      document.getElementById('lobby-mode-row').classList.remove('hidden');
       if (msg.isHost) {
         document.getElementById('btn-start-game').classList.remove('hidden');
         this._setStatus('You are the host — wait for friends, then Start Game.');
       } else {
+        document.getElementById('lobby-mode-row').classList.add('readonly');
         this._setStatus('Waiting for host to start…');
       }
       this._refreshList();
+      this._renderTeams();
+      this._refreshMatchStateUI();
     };
 
-    this._net.onPlayerJoined = () => this._refreshList();
-    this._net.onPlayerLeft   = () => this._refreshList();
+    this._net.onPlayerJoined = () => { this._refreshList(); this._renderTeams(); };
+    this._net.onPlayerLeft   = (msg) => {
+      // Free their team slot so the picker stays accurate.
+      delete this._teams[msg.id];
+      this._refreshList();
+      this._renderTeams();
+    };
     this._net.onPlayerReady  = () => this._refreshList();
 
     this._net.onHostTransfer = () => {
       document.getElementById('btn-start-game').classList.remove('hidden');
+      document.getElementById('lobby-mode-row').classList.remove('readonly');
       this._setStatus('You are now the host!');
+      this._renderTeams();
     };
 
+    // Match start: only late joiners (not in inGameIds) stay in the lobby
+    // — they see in-game players tagged and a Spectate button appear.
+    // Players who ARE in the match transition into the loading screen.
     this._net.onGameStart = (msg) => {
-      const buildEnabled   = this._buildEnabled();
-      const testingEnabled = this._testingEnabled();
-      document.getElementById('lobby-screen').classList.add('hidden');
-      document.getElementById('loading-screen').classList.remove('hidden');
-      const busPath = msg?.busPath ?? null;
-      setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled, this._music, busPath), 120);
+      const inMatch = this._net.inGameIds.has(this._net.myId);
+      if (inMatch) {
+        const buildEnabled   = this._buildEnabled();
+        const testingEnabled = this._testingEnabled();
+        document.getElementById('lobby-screen').classList.add('hidden');
+        document.getElementById('loading-screen').classList.remove('hidden');
+        const busPath = msg?.busPath ?? null;
+        setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled, this._music, busPath), 120);
+      } else {
+        // Late joiner — re-render lobby so in-game rows pick up the tag.
+        this._refreshList();
+        this._refreshMatchStateUI();
+      }
+    };
+
+    // When the running match ends, the lobby just refreshes: in-game tags
+    // disappear and the Spectate button hides. No screen swap needed — the
+    // late joiners were already sitting in the lobby.
+    this._net.onMatchEnded = () => {
+      this._refreshList();
+      this._renderTeams();
+      this._refreshMatchStateUI();
     };
 
     document.getElementById('lobby-screen').classList.remove('hidden');
@@ -159,16 +223,79 @@ class Menu {
     for (const [id, p] of this._net.players) {
       const isMe = id === this._net.myId;
       const li   = document.createElement('div');
-      li.className = 'lobby-player' + (isMe ? ' me' : '');
+      li.className = 'lobby-player'
+        + (isMe ? ' me' : '')
+        + (p.inGame ? ' in-game' : '');
+      // Players currently in the running match show an IN GAME tag in
+      // amber; lobby players show their ready/waiting status as before.
+      const statusHTML = p.inGame
+        ? `<span class="lp-ready">⚑ IN GAME</span>`
+        : `<span class="lp-ready ${p.ready ? 'yes' : ''}">${p.ready ? '✓ READY' : '○ WAITING'}</span>`;
       li.innerHTML = `
         <span class="lp-name">${isMe ? this._myName : p.name}${isMe ? ' (you)' : ''}</span>
-        <span class="lp-ready ${p.ready ? 'yes' : ''}">${p.ready ? '✓ READY' : '○ WAITING'}</span>
+        ${statusHTML}
       `;
       ul.appendChild(li);
     }
-    const total = this._net.players.size;
-    const rdy   = [...this._net.players.values()].filter(p => p.ready).length;
-    this._setStatus(`${total} / 10 players — ${rdy} ready`);
+    const total      = this._net.players.size;
+    const rdy        = [...this._net.players.values()].filter(p => p.ready && !p.inGame).length;
+    const inMatch    = [...this._net.players.values()].filter(p => p.inGame).length;
+    // Same "real-active" gate as _refreshMatchStateUI so stale gameActive
+    // state can't pin the status line on "Match in progress".
+    const realActive = this._net.gameActive && inMatch > 0;
+    if (realActive && !this._net.inGameIds.has(this._net.myId)) {
+      this._setStatus(`Match in progress (${inMatch} playing). You'll join the next round.`);
+    } else {
+      this._setStatus(`${total} / 20 players — ${rdy} ready`);
+    }
+  }
+
+  /**
+   * Reconciles host controls + Spectate button + team picker visibility
+   * with the current match state. Called whenever match state changes
+   * (gameStart, matchEnded, welcome).
+   */
+  _refreshMatchStateUI() {
+    if (!this._net) return;
+    const startBtn = document.getElementById('btn-start-game');
+    const specBtn  = document.getElementById('btn-spectate');
+    const teamRow  = document.getElementById('lobby-mode-row');
+
+    // `gameActive` alone isn't enough — if the server says a match is
+    // running but `inGameIds` is empty (stale state from a crash, etc.),
+    // there's nothing to spectate and the lobby should behave as idle.
+    const realActive = this._net.gameActive && this._net.inGameIds.size > 0;
+    const lateJoiner = realActive && !this._net.inGameIds.has(this._net.myId);
+
+    if (realActive) {
+      // A genuine match is running — hide host/mode controls and offer
+      // late joiners a Spectate button instead.
+      startBtn.classList.add('hidden');
+      teamRow.classList.add('hidden');
+      document.getElementById('lobby-teams').classList.add('hidden');
+      specBtn.classList.toggle('hidden', !lateJoiner);
+    } else {
+      // Idle lobby — restore host controls.
+      if (this._net.isHost) startBtn.classList.remove('hidden');
+      teamRow.classList.remove('hidden');
+      specBtn.classList.add('hidden');
+      this._renderTeams();
+    }
+  }
+
+  /**
+   * Late joiner clicks "Spectate Match". Boot a Game in `multi` mode; the
+   * Game constructor detects net.gameActive and starts in spectator mode
+   * instead of running deploy.
+   */
+  _startSpectator() {
+    // Only spectate when there's actually a running match with people in it.
+    if (!this._net?.gameActive || this._net.inGameIds.size === 0) return;
+    const buildEnabled   = this._buildEnabled();
+    const testingEnabled = this._testingEnabled();
+    document.getElementById('lobby-screen').classList.add('hidden');
+    document.getElementById('loading-screen').classList.remove('hidden');
+    setTimeout(() => new Game('multi', this._net, buildEnabled, testingEnabled, this._music, null), 120);
   }
 
   _toggleReady() {
@@ -184,11 +311,121 @@ class Menu {
   }
 
   _requestStart() {
-    if ((this._net?.players.size ?? 0) < 2) {
-      this._setStatus('Need at least 2 players to start!');
+    if (this._matchMode === 'duo') {
+      // Refuse a start until every player has a team (and at least 2 teams).
+      this._autoFillTeams();
+      const teams = new Set(Object.values(this._teams));
+      if (Object.keys(this._teams).length < this._net.players.size) {
+        this._setStatus('Assign every player to a team first.');
+        return;
+      }
+      if (teams.size < 2) {
+        this._setStatus('Need at least 2 teams to start a Duo.');
+        return;
+      }
+    }
+    this._net.startGame(this._matchMode, this._teams);
+  }
+
+  /**
+   * Fill any unassigned players into the smallest team (round-robin) so a
+   * host can hit Start without manually placing everyone. Teams are
+   * letter-coded A, B, C, … with a 2-player cap each. Capped at 10 teams
+   * (= up to 20 players).
+   */
+  _autoFillTeams() {
+    const ids   = [...this._net.players.keys()];
+    const cap   = 2;             // Duo team size
+    const maxTeams = 10;         // 10 teams × 2 = 20 players
+    const teams = {};            // teamId → [playerIds]
+    const ensureTeam = (t) => teams[t] ?? (teams[t] = []);
+    // Seed with whatever the host already arranged.
+    for (const [pid, t] of Object.entries(this._teams)) {
+      if (ids.includes(pid)) ensureTeam(t).push(pid);
+    }
+    const letter = (n) => String.fromCharCode(65 + n); // 0 -> A
+    for (const pid of ids) {
+      if (this._teams[pid]) continue;
+      let placed = false;
+      // Try existing teams that have room.
+      for (let i = 0; i < maxTeams && !placed; i++) {
+        const t = letter(i);
+        const arr = ensureTeam(t);
+        if (arr.length < cap) { arr.push(pid); this._teams[pid] = t; placed = true; }
+      }
+      if (!placed) break; // 20 players already placed
+    }
+  }
+
+  /**
+   * Render the team picker. Host-clickable; non-hosts see read-only.
+   * The picker is hidden in Solo (FFA).
+   */
+  _renderTeams() {
+    const container = document.getElementById('lobby-teams');
+    if (!container) return;
+    if (this._matchMode !== 'duo' || !this._net) {
+      container.classList.add('hidden');
+      container.innerHTML = '';
       return;
     }
-    this._net.startGame();
+    container.classList.remove('hidden');
+
+    // Make sure every player has a team slot, then group by team.
+    this._autoFillTeams();
+    const byTeam = {};
+    for (const pid of this._net.players.keys()) {
+      const t = this._teams[pid] ?? 'A';
+      (byTeam[t] = byTeam[t] || []).push(pid);
+    }
+
+    container.innerHTML = '';
+    const teamIds = Object.keys(byTeam).sort();
+    for (const t of teamIds) {
+      const div = document.createElement('div');
+      div.className = 'lobby-team';
+      div.dataset.team = t;
+      let html = `<span class="team-title">Team ${t}</span>`;
+      for (let i = 0; i < 2; i++) {
+        const pid = byTeam[t][i];
+        if (pid) {
+          const name = this._net.players.get(pid)?.name ?? `Player ${pid}`;
+          html += `<span class="team-slot" data-pid="${pid}">${name}</span>`;
+        } else {
+          html += `<span class="team-slot empty">(empty)</span>`;
+        }
+      }
+      container.appendChild(div);
+      div.innerHTML = html;
+    }
+
+    // Click-to-swap behavior, host-only. Click a chip to select it, then
+    // click another chip to swap, or an empty slot to move there.
+    if (!this._net.isHost) return;
+    container.querySelectorAll('.team-slot').forEach(el => {
+      el.addEventListener('click', () => {
+        const pid = el.dataset.pid;
+        if (this._teamSelected == null) {
+          if (!pid) return;       // can't start a move from an empty slot
+          this._teamSelected = pid;
+          el.parentElement.classList.add('target-selected');
+          return;
+        }
+        const targetTeam = el.parentElement.dataset.team;
+        if (pid && pid !== this._teamSelected) {
+          // Swap two players' team assignments.
+          const a = this._teamSelected, b = pid;
+          const ta = this._teams[a], tb = this._teams[b];
+          this._teams[a] = tb; this._teams[b] = ta;
+        } else if (!pid) {
+          // Move selected to empty slot if that team has room.
+          const arr = byTeam[targetTeam] ?? [];
+          if (arr.length < 2) this._teams[this._teamSelected] = targetTeam;
+        }
+        this._teamSelected = null;
+        this._renderTeams();
+      });
+    });
   }
 
   _setStatus(txt) {
@@ -207,6 +444,15 @@ class Game {
     this._lobbyMusic    = lobbyMusic;
     this._busPath       = busPath;
     this.deploy         = null;
+    this.spectator      = null;
+    this._matchOverShown = false;
+    // Late-spectator: we're spinning up a Game *after* the host already
+    // started the match. Skip deploy and drop straight into spectator mode
+    // so the player can watch the running round from a teammate's POV.
+    this._lateSpectator  = !!(mode === 'multi' && net?.gameActive
+      && net?.inGameIds && !net.inGameIds.has(net.myId));
+    this.supplyDrops    = null;
+    this._eHeld         = false;
     this.canvas = document.getElementById('game-canvas');
     this.clock  = new THREE.Clock();
     this.running = false;
@@ -224,6 +470,7 @@ class Game {
     try {
       this._setupRenderer();
       this._setupScene();
+      this._setupPostFX();
       await this._loadWorld();
       this._setupEvents();
       this._startLoop();
@@ -241,8 +488,73 @@ class Game {
     this.renderer.shadowMap.enabled   = true;
     this.renderer.shadowMap.type      = THREE.PCFShadowMap;
     this.renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure  = 1.1;
+    this.renderer.toneMappingExposure  = 1.35;
     this.renderer.outputColorSpace    = THREE.SRGBColorSpace;
+  }
+
+  /**
+   * Build the post-processing chain: RenderPass → UnrealBloomPass → vignette+grain.
+   * Called once after scene/camera exist, since RenderPass needs both. Cheap
+   * enough on capped pixel-ratio that it costs ~1–2ms/frame on mid-range GPUs.
+   */
+  _setupPostFX() {
+    const w = window.innerWidth, h = window.innerHeight;
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.composer.setSize(w, h);
+
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+
+    // Bloom — strength 0.55 is moderate (not blown-out), radius 0.4 spreads
+    // it naturally, threshold 0.85 ignores normal-lit surfaces and only
+    // catches emissives (storm, sun, muzzle flashes, fire pits, supply-drop lids).
+    const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.4, 0.85);
+    this.composer.addPass(bloom);
+
+    // Vignette + film grain pass. Vignette darkens corners; grain is a tiny
+    // animated noise (~3% brightness wobble) for cinematic texture. Time
+    // uniform is bumped each frame in the loop.
+    this._grainPass = new ShaderPass({
+      uniforms: {
+        tDiffuse: { value: null },
+        uTime:    { value: 0 },
+        uVignette:{ value: 0.45 },
+        uGrain:   { value: 0.0 },
+      },
+      vertexShader: /*glsl*/ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /*glsl*/ `
+        uniform sampler2D tDiffuse;
+        uniform float uTime;
+        uniform float uVignette;
+        uniform float uGrain;
+        varying vec2 vUv;
+        // Hash-based pseudo-random noise — cheap, no texture sample.
+        float hash(vec2 p) {
+          p = fract(p * vec2(123.34, 456.21));
+          p += dot(p, p + 45.32);
+          return fract(p.x * p.y);
+        }
+        void main() {
+          vec4 col = texture2D(tDiffuse, vUv);
+          // Vignette: subtle darkening toward the corners.
+          vec2 q = vUv - 0.5;
+          float vig = smoothstep(0.95, 0.45, length(q));
+          col.rgb *= mix(1.0, vig, uVignette * 0.35);
+          // Grain: time-animated noise, additive in luminance.
+          float n = hash(vUv * vec2(1920.0, 1080.0) + uTime * 60.0);
+          col.rgb += (n - 0.5) * uGrain;
+          gl_FragColor = col;
+        }
+      `,
+    });
+    this._grainPass.renderToScreen = true;
+    this.composer.addPass(this._grainPass);
   }
 
   _setupScene() {
@@ -290,7 +602,14 @@ class Game {
     this.camera3P  = new ThirdPersonCamera(this.camera, this.player);
     this.particles = new ParticleSystem(this.scene);
     this.projectiles = new ProjectileSystem(this.scene, this.world);
-    this.weapons   = new WeaponSystem(this.scene, this.world);
+    // Ammo system must exist before WeaponSystem so weapons can spawn
+    // matching ammo piles next to themselves at world setup.
+    this.ammo      = new AmmoSystem(this.scene, this.world);
+    // In multiplayer, use the server's worldSeed so every client rolls
+    // identical weapon types at the same SPAWN_POINTS — otherwise solo
+    // RNG diverges and a spectator sees different guns than the players.
+    const loadoutSeed = this.net?.worldSeed ?? null;
+    this.weapons   = new WeaponSystem(this.scene, this.world, this.ammo, loadoutSeed);
     this.inventory = new Inventory(this.player);
     this.pickups   = new PickupManager(this.scene, this.world);
 
@@ -322,6 +641,22 @@ class Game {
     // every client sees the same radius/phase regardless of when they land.
     if (this.storm && this.net?.gameStartTime != null) {
       this.storm.setClockStart(this.net.gameStartTime);
+    }
+
+    // Supply drops — battle-royale style hot-air-balloon crates with
+    // mythic/legendary loot. Disabled in zombie mode (no storm circle).
+    if (this.mode !== 'zombie') {
+      this.supplyDrops = new SupplyDropManager({
+        scene:   this.scene,
+        world:   this.world,
+        storm:   this.storm,
+        pickups: this.pickups,
+        weapons: this.weapons,
+        ammo:    this.ammo,
+        // In multiplayer the host runs the spawn timer and broadcasts;
+        // non-hosts wait for messages. Solo passes null and runs locally.
+        net:     this.net,
+      });
     }
     this.shake   = new ScreenShake();
     this.muzzle  = new MuzzleFlash(this.scene);
@@ -366,18 +701,41 @@ class Game {
     this._mapTerrain = this.world.renderMapCanvas();
     this._mapOpen    = false;
 
+    // HUD's minimap needs whichever enemy manager is active. Solo uses
+    // `this.enemies`; zombie mode uses `this.zombieWaves` (set later in
+    // _loadWorld); multiplayer leaves both null. We attach whichever the
+    // active mode has via setEnemyManager.
     this.hud = new HUD(this.player, this.world, this.enemies, this.inventory, this.storm);
+    if (this.zombieWaves) this.hud.setEnemyManager(this.zombieWaves);
+    if (this.net) this.hud.setNetwork(this.net);
     this.hud.setWeaponSystem(this.weapons);
     this.hud.setPickupManager(this.pickups);
     this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
+
+    // Drop a slot → spawn a world pickup at the player's feet (forward
+    // offset so it doesn't clip the body). For weapons we preserve the
+    // ammo/reserve state; consumables spawn one pickup per item in the
+    // stack so a full stack can be recovered.
+    this.inventory.onDrop = (item) => {
+      if (item.isConsumable) this._spawnDroppedConsumable(item);
+      else                   this._spawnDroppedWeapon(item);
+    };
 
     if (this.testingEnabled) {
       for (const id of ['phaseRifle', 'sniper', 'rocketLauncher', 'minigun', 'bombLauncher']) {
         this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS[id]));
       }
+      // Seed the shared ammo pool generously so testing-mode weapons can
+      // actually be reloaded without scavenging.
+      this.inventory.addAmmo('light',   600);
+      this.inventory.addAmmo('medium',  300);
+      this.inventory.addAmmo('heavy',    60);
+      this.inventory.addAmmo('rockets',  20);
+      this.inventory.addAmmo('shells',   60);
       this.player._sprintMultiplier = 2.0;
     } else {
       this.inventory.addWeapon(new WeaponInstance(WEAPON_DEFS.pistol));
+      // Players start with only the loaded pistol mag — no reserve pools.
     }
 
     // ── 7. Shader prewarm + compile ───────────────────────────────────
@@ -489,11 +847,16 @@ class Game {
         this._updateZombieHUD(secs, next);
       };
     } else {
-      const totalPlayers = this.net.players.size;
-      this.hud.setEnemiesRemaining(totalPlayers - 1, totalPlayers - 1);
+      // Latch the opponent baseline at match start so the HUD denominator
+      // doesn't shift when teammates also die (in Duo).
+      this._totalOpponents = this.net.totalOpponentCount();
+      this.hud.setEnemiesRemaining(this._totalOpponents, this._totalOpponents);
       document.querySelector('.er-label').textContent = 'PLAYERS';
 
       this.net.onLocalHit = (damage, fromId) => {
+        // Friendly fire: a teammate's bullet still arrives over the wire
+        // (their client can't filter for us reliably) — drop it here.
+        if (this.net.isTeammate(fromId)) return;
         const srcPos = this.net.remotePlayers.get(fromId)?.root.position ?? null;
         const killerName = this.net.players.get(fromId)?.name ?? 'a player';
         this.player.takeDamage(damage, false, srcPos, killerName);
@@ -506,18 +869,43 @@ class Game {
           this.hitMark.hit(true);
           this._lastHitTarget = null;
         }
-        const alive = this.net.aliveRemoteCount();
-        this.hud.setEnemiesRemaining(alive, totalPlayers - 1);
-        if (!this.player.dead && alive === 0 && !this._victoryShown) {
+        // Victory check uses team-aware opponent count so a Duo wins as
+        // long as their team still has at least one alive player even if
+        // teammates are down.
+        const aliveOpp = this.net.aliveOpponentCount();
+        this.hud.setEnemiesRemaining(aliveOpp, this._totalOpponents);
+        if (!this.player.dead && aliveOpp === 0 && !this._victoryShown) {
           this._victoryShown = true;
           setTimeout(() => this._showVictory(), 1200);
         }
       };
 
+      // Mirror remote weapon drops: spawn a world pickup at the broadcast
+      // location so the gun is visible and re-collectable by other players.
+      this.net.onWeaponDropped = (msg) => {
+        const def = WEAPON_DEFS[msg.weaponId];
+        if (!def) return;
+        const pos = new THREE.Vector3(msg.pos[0], msg.pos[1], msg.pos[2]);
+        this.weapons.pickups.push(new WeaponPickup(
+          this.scene, def, pos,
+          { ammo: msg.ammo, reserve: msg.reserve },
+        ));
+      };
+
       this.net.onRemoteShoot = (msg) => {
         const orig = new THREE.Vector3(...msg.orig);
         const dir  = new THREE.Vector3(...msg.dir);
-        this.projectiles.spawn(orig, dir, { speed: 180, damage: 0, faction: 'remote', range: 300 });
+        // Pass the weapon def along so explosive shots (rocket, nuke) get
+        // their proper bullet speed, range, and detonation visuals on the
+        // receiving end — spectators included.
+        const def = msg.weapon ? WEAPON_DEFS[msg.weapon] : null;
+        this.projectiles.spawn(orig, dir, {
+          speed:   def?.bulletSpeed ?? 180,
+          damage:  0,
+          faction: 'remote',
+          range:   def?.range ?? 300,
+          def,
+        });
         if (this.audio && msg.weapon) {
           const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
           this.audio.playAt(msg.weapon, orig, this.player.getPosition(), right);
@@ -550,13 +938,28 @@ class Game {
       this.hitMark.hit(justKilled);
     };
 
-    // ── 8. Battle bus deploy ──────────────────────────────────────────
+    // ── 8. Battle bus deploy / late-spectator ─────────────────────────
     // Match starts mid-air: ride the bus, jump, skydive, parachute in.
     // While deploy is active the loop skips normal player/enemy/storm ticks.
-    this.storm?.update(0, this.player, false); // set storm-wall mesh to its real scale
-    this.deploy = new DeployController(
-      this.scene, this.world, this.player, this.camera, this._busPath
-    );
+    // Late spectators skip deploy entirely — they're joining mid-round, so
+    // we lock the local player out of gameplay and pop them into SpectatorController.
+    this.storm?.update(0, this.player, false);
+    if (this._lateSpectator) {
+      this.deploy = null;
+      // Lock the player out: dead state freezes physics + inputs and lets
+      // SpectatorController take ownership of the camera.
+      this.player.dead = true;
+      if (this.player?.body) this.player.body.visible = false;
+      // Spawn immediately so spectator has cameras to cycle to. The Game's
+      // matchEnded handler reloads the page so we cleanly return to lobby.
+      this.net.onMatchEnded = () => location.reload();
+      // Defer one frame so the loading screen has time to fade.
+      setTimeout(() => this._enterSpectator(), 250);
+    } else {
+      this.deploy = new DeployController(
+        this.scene, this.world, this.player, this.camera, this._busPath
+      );
+    }
 
     // ── 9. Ready ──────────────────────────────────────────────────────
     step('Ready!', 100);
@@ -577,9 +980,31 @@ class Game {
       if (!document.pointerLockElement) this.canvas.requestPointerLock();
     });
 
+    // Track hold-state of the E key — used by supply drops which require
+    // the player to hold for OPEN_HOLD_TIME seconds.
+    window.addEventListener('keyup', e => {
+      if (e.code === 'KeyE') this._eHeld = false;
+    });
+    window.addEventListener('blur', () => { this._eHeld = false; });
+
     window.addEventListener('keydown', e => {
       if (!this.running) return;
-      if (this.deploy?.active) return;  // no gameplay keys during the bus/skydive
+
+      // Map is allowed during the bus/skydive deploy phase so the player can
+      // study landing options. All other gameplay keys remain gated.
+      if (this.deploy?.active) {
+        if (e.code === 'KeyM') { this._toggleMap(); return; }
+        return;
+      }
+
+      // ── Spectator key bindings (only when actively spectating) ──────
+      // Cycles handle dead/disconnected targets internally via SpectatorController.
+      if (this.spectator?.active) {
+        if (e.code === 'KeyD' || e.code === 'ArrowRight') { this.spectator.next();     return; }
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft')  { this.spectator.previous(); return; }
+        if (e.code === 'Escape') { location.reload(); return; }
+        return; // swallow everything else — no inventory/build/etc. while spectating
+      }
 
       // Inventory panel
       if (e.code === 'Tab') { e.preventDefault(); this._toggleInvPanel(); return; }
@@ -601,12 +1026,21 @@ class Game {
       }
 
       if (e.code === 'KeyE') {
+        // Mark E as held — supply drops poll this each frame.
+        this._eHeld = true;
+
+        // If near a (landed but unopened) supply drop, defer to the
+        // hold-to-open mechanic and skip the instant pickup branch.
+        if (this.supplyDrops?.getNearbyDrop(this.player)) return;
+
         const wp = this.weapons.getNearbyPickup();
         if (wp) {
-          this.inventory.addWeapon(new WeaponInstance(wp.def));
+          // Preserve the dropped weapon's ammo state on re-pickup.
+          this.inventory.addWeapon(new WeaponInstance(wp.def, { ammo: wp.ammo, reserve: wp.reserve }));
           wp.collect();
           return;
         }
+        // Ammo piles are auto-collected on proximity (see AmmoSystem.update).
         const def = this.pickups.tryCollect();
         if (def) {
           this.inventory.addConsumable(def);
@@ -623,12 +1057,14 @@ class Game {
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.composer?.setSize(window.innerWidth, window.innerHeight);
     });
   }
 
   // ── Shooting ──────────────────────────────────────────────────────────────
   _tryShoot() {
     if (this.deploy?.active) { this._prevMouseDown = this.player.mouseDown; return; }
+    if (this.spectator?.active) { this._prevMouseDown = this.player.mouseDown; return; }
     if (!document.pointerLockElement) {
       this._prevMouseDown = this.player.mouseDown;
       return;
@@ -706,8 +1142,20 @@ class Game {
 
   // ── End screens ───────────────────────────────────────────────────────────
   _showDeathScreen(killerLabel) {
-    const statsLabel = this.mode === 'multi' ? `Kills: ${this._playerKills}` : `Enemies remaining: ${this._totalEnemies - this._killCount}`;
-    const killedByLine = killerLabel ? `<p class="killed-by">Eliminated by <strong>${killerLabel}</strong></p>` : '';
+    const statsLabel = this.mode === 'multi'
+      ? `Kills: ${this._playerKills}`
+      : `Enemies remaining: ${this._totalEnemies - this._killCount}`;
+    const killedByLine = killerLabel
+      ? `<p class="killed-by">Eliminated by <strong>${killerLabel}</strong></p>`
+      : '';
+
+    // Spectator only makes sense in multiplayer when at least one other
+    // player is still alive. In solo / zombie / final-kill cases we skip
+    // straight to the lobby button.
+    const canSpectate = this.mode === 'multi'
+      && this.net
+      && this.net.aliveRemoteCount() > 0;
+
     const el = document.createElement('div');
     el.id = 'death-screen';
     el.innerHTML = `<div class="end-content">
@@ -715,12 +1163,72 @@ class Game {
       <h1>ELIMINATED</h1>
       ${killedByLine}
       <p>${statsLabel}</p>
-      <button onclick="location.reload()">Play Again</button>
+      <div class="end-buttons">
+        ${canSpectate ? '<button id="btn-spectate">Spectate</button>' : ''}
+        <button id="btn-lobby">Return to Lobby</button>
+      </div>
     </div>`;
     document.body.appendChild(el);
+
+    el.querySelector('#btn-lobby').addEventListener('click', () => {
+      location.reload();
+    });
+    if (canSpectate) {
+      el.querySelector('#btn-spectate').addEventListener('click', () => {
+        el.remove();
+        this._enterSpectator();
+      });
+    }
+  }
+
+  // ── Spectator entry / exit ────────────────────────────────────────────────
+  _enterSpectator() {
+    if (this.spectator?.active) return;
+
+    // The local player mesh is left visible — other clients see our dead
+    // body too (via their RemotePlayer.die()), so keeping it visible
+    // locally matches what the rest of the lobby observes.
+
+    this.spectator = new SpectatorController({
+      camera: this.camera,
+      net:    this.net,
+      onMatchOver: () => this._showSpectatorMatchOver(),
+    });
+    this.spectator.start();
+
+    // Re-acquire pointer lock so mouse stays captured for any future input.
+    if (!document.pointerLockElement) this.canvas.requestPointerLock();
+  }
+
+  // Called by SpectatorController when no alive targets remain (last player
+  // died or disconnected). Shown only once per match.
+  _showSpectatorMatchOver() {
+    if (this._matchOverShown) return;
+    this._matchOverShown = true;
+    // Server resets gameActive so late joiners waiting in lobby can play.
+    this.net?.sendMatchEnd();
+
+    // Tear down the spectator HUD so it doesn't overlap the prompt.
+    if (this.spectator) { this.spectator.stop(); }
+
+    const el = document.createElement('div');
+    el.id = 'match-over-screen';
+    el.innerHTML = `<div class="end-content">
+      <div class="end-icon">⚑</div>
+      <h1>MATCH OVER</h1>
+      <p>Kills: ${this._playerKills}</p>
+      <div class="end-buttons">
+        <button id="btn-lobby-mo">Return to Lobby</button>
+      </div>
+    </div>`;
+    document.body.appendChild(el);
+    el.querySelector('#btn-lobby-mo').addEventListener('click', () => location.reload());
   }
 
   _showVictory() {
+    // Inform the server the match is over so the lobby reopens for any
+    // late joiners who connected during the round.
+    this.net?.sendMatchEnd();
     const label = this.mode === 'multi' ? `Kills: ${this._playerKills}` : 'All enemies eliminated!';
     const el = document.createElement('div');
     el.id = 'victory-screen';
@@ -789,6 +1297,46 @@ class Game {
       x: (wx / S + 0.5) * W,
       y: (wz / S + 0.5) * H,
     });
+
+    // ── Battle-bus flight path (only while still deploying) ────────────────
+    // Drawn early so storm / POI labels render over it. After deploy ends the
+    // path is no longer relevant and is omitted entirely.
+    if (this.deploy?.active) {
+      const a = this.deploy.getBusStart();
+      const b = this.deploy.getBusEnd();
+      if (a && b) {
+        const pa = toCanvas(a.x, a.z);
+        const pb = toCanvas(b.x, b.z);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+        ctx.lineWidth   = 6;
+        ctx.setLineDash([14, 10]);
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+        // Solid outline core for legibility
+        ctx.setLineDash([]);
+        ctx.strokeStyle = 'rgba(255,200,80,0.95)';
+        ctx.lineWidth   = 2;
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+        // Arrowhead at the END of the path indicating bus direction
+        const ang = Math.atan2(pb.y - pa.y, pb.x - pa.x);
+        const ah = 12;
+        ctx.fillStyle = 'rgba(255,200,80,0.95)';
+        ctx.beginPath();
+        ctx.moveTo(pb.x, pb.y);
+        ctx.lineTo(pb.x - Math.cos(ang - 0.4) * ah, pb.y - Math.sin(ang - 0.4) * ah);
+        ctx.lineTo(pb.x - Math.cos(ang + 0.4) * ah, pb.y - Math.sin(ang + 0.4) * ah);
+        ctx.closePath(); ctx.fill();
+        // "BUS" label near the midpoint
+        const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+        ctx.font = 'bold 13px "Segoe UI", Arial';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(255,200,80,1)';
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.lineJoin = 'round';
+        ctx.strokeText('BATTLE BUS', mx, my - 10);
+        ctx.fillText('BATTLE BUS', mx, my - 10);
+        ctx.restore();
+      }
+    }
 
     // ── Storm circle (hidden while the storm is still pending) ─────────────
     if (this.storm) {
@@ -875,6 +1423,44 @@ class Game {
       ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
     }
 
+    // ── Ammo pile markers ────────────────────────────────────────────────────
+    if (this.ammo) {
+      for (const p of this.ammo.pickups) {
+        if (p.collected) continue;
+        const { x, y } = toCanvas(p.root.position.x, p.root.position.z);
+        const visual = AMMO_VISUAL[p.type];
+        const col = visual ? '#' + visual.color.toString(16).padStart(6, '0') : '#ffffff';
+        ctx.fillStyle = col;
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        // Tiny diamond, smaller than weapons to avoid clutter.
+        ctx.beginPath();
+        ctx.moveTo(x, y - 3); ctx.lineTo(x + 3, y);
+        ctx.lineTo(x, y + 3); ctx.lineTo(x - 3, y);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
+
+    // ── Supply drop markers ──────────────────────────────────────────────────
+    if (this.supplyDrops) {
+      for (const d of this.supplyDrops.getDrops()) {
+        const { x, y } = toCanvas(d.x, d.z);
+        ctx.fillStyle   = '#ffaa00';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth   = 1.5;
+        // Hollow square + cross for legibility against POI text/pickups.
+        ctx.beginPath();
+        ctx.moveTo(x - 5, y - 5); ctx.lineTo(x + 5, y - 5);
+        ctx.lineTo(x + 5, y + 5); ctx.lineTo(x - 5, y + 5);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, y - 3); ctx.lineTo(x, y + 3);
+        ctx.moveTo(x - 3, y); ctx.lineTo(x + 3, y);
+        ctx.stroke();
+      }
+    }
+
     // ── Health / shield pickup dots ──────────────────────────────────────────
     const healPickups = this.hud._pickupManager?.pickups ?? [];
     for (const p of healPickups) {
@@ -892,10 +1478,13 @@ class Game {
         if (rp.dead) continue;
         const rpos = rp.root.position;
         const { x, y } = toCanvas(rpos.x, rpos.z);
+        // Teammates render green, opponents orange — same palette as the
+        // minimap and 3D nametag.
+        const col = rp.isTeammate ? '#4ade80' : '#ff8800';
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(-rp.root.rotation.y);
-        ctx.fillStyle   = '#ff8800';
+        ctx.fillStyle   = col;
         ctx.strokeStyle = '#000';
         ctx.lineWidth   = 1.5;
         ctx.beginPath();
@@ -905,7 +1494,7 @@ class Game {
         // Name label
         ctx.font = '9px "Segoe UI", Arial';
         ctx.textAlign = 'center';
-        ctx.fillStyle = '#ff8800';
+        ctx.fillStyle = col;
         ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
         ctx.strokeText(rp.name, x, y - 10);
         ctx.fillText(rp.name, x, y - 10);
@@ -1014,7 +1603,7 @@ class Game {
         } else {
           colorHex = '#' + item.def.rarityColor.toString(16).padStart(6, '0');
           name     = item.def.name;
-          detail   = item.reloading ? 'Reloading…' : `${item.ammo} / ${item.reserve}`;
+          detail   = item.reloading ? 'Reloading…' : `${item.ammo} / ${item.displayReserve}`;
         }
       }
 
@@ -1051,8 +1640,9 @@ class Game {
         dropBtn.addEventListener('click', e => {
           e.stopPropagation();
           const si = parseInt(e.target.dataset.slot);
-          this.inventory.slots[si] = null;
-          if (si === this.inventory.activeSlot) this.player.setHeldWeapon(null);
+          // Route through dropSlot so weapons spawn a re-collectable pickup
+          // (and consumables get discarded as before).
+          this.inventory.dropSlot(si);
           if (this._invSelectedSlot === si) this._invSelectedSlot = -1;
           this._renderInvPanel();
         });
@@ -1084,6 +1674,92 @@ class Game {
     if (cur) cur.textContent = this.building.typeLabel;
   }
 
+  // ── Item drop ────────────────────────────────────────────────────────────
+  // Spawns a world pickup carrying the dropped weapon's ammo state, placed
+  // ~1.2m in front of the player (forward of the camera yaw) so it doesn't
+  // get stuck inside the body. Falls back to feet position if terrain is
+  // unavailable at the offset spot.
+  _spawnDroppedWeapon(inst) {
+    const pos = this._dropPositionForward();
+    this.weapons.pickups.push(new WeaponPickup(
+      this.scene, inst.def, pos,
+      { ammo: inst.ammo, reserve: inst.reserve },
+    ));
+    // Replicate so other players (and spectators) see the dropped gun.
+    this.net?.sendWeaponDropped(inst.def.id, pos, inst.ammo, inst.reserve);
+  }
+
+  // Consumable dropped on the floor — preserve stack count by spawning one
+  // pickup per unit. Small random angular jitter prevents them from
+  // overlapping perfectly.
+  _spawnDroppedConsumable(item) {
+    const count = item.count ?? 1;
+    const base  = this._dropPositionForward();
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * Math.PI * 2 + Math.random() * 0.3;
+      const r = 0.3 + Math.random() * 0.3;
+      const pos = new THREE.Vector3(
+        base.x + Math.cos(a) * r,
+        base.y,
+        base.z + Math.sin(a) * r,
+      );
+      this.pickups.spawnAt(item.def, pos);
+    }
+  }
+
+  // Reusable: world position ~1.2m in front of the player at terrain height.
+  _dropPositionForward() {
+    const pp  = this.player.getPosition();
+    const yaw = this.player.getYaw();
+    const fwdX = pp.x - Math.sin(yaw) * 1.2;
+    const fwdZ = pp.z - Math.cos(yaw) * 1.2;
+    const groundY = this.world.getTerrainHeight(fwdX, fwdZ);
+    const baseY = groundY >= 0 ? groundY : pp.y;
+    return new THREE.Vector3(fwdX, baseY + 0.15, fwdZ);
+  }
+
+  // ── Supply Drop HUD ───────────────────────────────────────────────────────
+  _ensureSupplyHud() {
+    if (this._supplyHudEl) return;
+    const el = document.createElement('div');
+    el.id = 'supply-hud';
+    el.innerHTML = `
+      <div class="sd-label">Hold <kbd>E</kbd> to open Supply Drop</div>
+      <div class="sd-bar"><div class="sd-bar-fill" id="sd-bar-fill"></div></div>
+    `;
+    el.style.display = 'none';
+    document.getElementById('hud').appendChild(el);
+    this._supplyHudEl = el;
+    this._supplyHudFill = el.querySelector('#sd-bar-fill');
+  }
+
+  _updateSupplyHud() {
+    this._ensureSupplyHud();
+    if (!this.supplyDrops) return;
+    const drop = this.supplyDrops.getNearbyDrop(this.player);
+    if (!drop) {
+      this._supplyHudEl.style.display = 'none';
+      return;
+    }
+    this._supplyHudEl.style.display = 'flex';
+    const pct = Math.max(0, Math.min(1, drop.progressFraction));
+    this._supplyHudFill.style.width = (pct * 100).toFixed(1) + '%';
+  }
+
+  /**
+   * One render call. Bumps the grain pass time so the noise animates.
+   * Falls back to a direct renderer.render if the composer wasn't set up
+   * (defensive — should never happen in normal startup).
+   */
+  _render() {
+    if (this.composer) {
+      if (this._grainPass) this._grainPass.uniforms.uTime.value += 0.016;
+      this.composer.render();
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
+  }
+
   // ── Game Loop ─────────────────────────────────────────────────────────────
   _startLoop() {
     const loop = () => {
@@ -1108,8 +1784,51 @@ class Game {
         }
         this.particles.update(dt);
         this.shake.update(dt);
-        this.renderer.render(this.scene, this.camera);
+        // Big map (M) stays interactive during deploy so the player can
+        // pick a landing spot — repaint each frame so the player arrow
+        // and bus path animate live.
+        if (this._mapOpen) this._drawMap();
+        this._render();
         return;
+      }
+
+      // ── Spectator phase: local player is dead and watching others ─────
+      // World keeps simulating (storm, projectiles, remote players) so the
+      // spectator sees an accurate live view. Local player physics is
+      // already frozen via player.dead, so we just skip its update entirely.
+      if (this.spectator?.active) {
+        this.spectator.update(dt);
+        if (this.storm) this.storm.update(dt, this.player);     // damage call is a no-op once dead
+        if (this.net)   this.net.update(dt, this.camera, this.canvas);
+        // Bullets fired by remaining players are still in flight; keep them moving.
+        const remotes_s = this.net ? this.net.getRemotePlayers() : null;
+        this.projectiles.update(dt, this.player, null, this.particles, remotes_s);
+        this.particles.update(dt);
+        this.shake.update(dt);
+        this.hud.update(dt);
+        // Still broadcast our "spectating" phase so other clients can hide our model.
+        if (this.net) {
+          this._netTimer -= dt;
+          if (this._netTimer <= 0) {
+            this._netTimer = 0.1;
+            this.net.sendState(this.player.getPosition(), this.player.getYaw(), PHASE_SPECTATING);
+          }
+        }
+        this._render();
+        return;
+      }
+
+      // Multiplayer instant-victory: a host who started alone (or whose
+      // opponents all disconnected before any kill registered) has nobody
+      // left to fight. onRemoteDeath only fires on actual deaths, so this
+      // covers the "no opponents to begin with" path. Fires once.
+      if (this.mode === 'multi'
+          && !this._victoryShown
+          && !this.player.dead
+          && this.net?.gameActive
+          && this.net.aliveOpponentCount() === 0) {
+        this._victoryShown = true;
+        setTimeout(() => this._showVictory(), 1200);
       }
 
       this._tryShoot();
@@ -1121,6 +1840,14 @@ class Game {
       this.inventory.update(dt);
       this.weapons.update(dt, this.player, this.camera);
       this.pickups.update(dt, this.player);
+      // Ammo auto-pickup on proximity — walking through a pile is enough.
+      this.ammo?.update(dt, this.player, this.inventory, (pickup) => {
+        const v = AMMO_VISUAL[pickup.type];
+        this.hud.showPickupMessage(
+          `+${pickup.amount} ${v?.label ?? pickup.type}`,
+          v?.color ?? 0xffffff,
+        );
+      });
 
       const remotes = this.net ? this.net.getRemotePlayers() : null;
       const activeEnemies = this.zombieWaves ?? this.enemies;
@@ -1136,6 +1863,14 @@ class Game {
         }
       }
       if (this.storm) this.storm.update(dt, this.player);
+      // Sun shadow camera tracks the player so the tight ortho frustum
+      // stays useful far from world origin. Cheap — just a few writes.
+      const pp = this.player.getPosition();
+      this.world.updateShadowFollow?.(pp.x, pp.z);
+      if (this.supplyDrops) {
+        this.supplyDrops.update(dt, this.player, this._eHeld);
+        this._updateSupplyHud();
+      }
       this.particles.update(dt);
       this.shake.update(dt);
       this.muzzle.update(dt);
@@ -1149,13 +1884,18 @@ class Game {
         this._netTimer -= dt;
         if (this._netTimer <= 0) {
           this._netTimer = 0.033;
-          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3);
+          // Include weapon + ammo so spectators can read live ammo counts.
+          const a = this.inventory.getActive();
+          const weaponId = (a && !a.isConsumable) ? a.def.id : null;
+          const ammo     = (a && !a.isConsumable) ? a.ammo : null;
+          const reserve  = (a && !a.isConsumable) ? a.displayReserve : null;
+          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3, weaponId, ammo, reserve);
         }
       }
 
       if (this._mapOpen) this._drawMap();
 
-      this.renderer.render(this.scene, this.camera);
+      this._render();
     };
     loop();
   }

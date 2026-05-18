@@ -243,24 +243,34 @@ export class World {
   // ── Lights ──────────────────────────────────────────────────────────
   _buildLights() {
     // Sky/ground hemisphere for natural ambient color separation
-    const hemi = new THREE.HemisphereLight(0x87ceeb, 0x4a7c4e, 0.6);
+    const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, 0.95);
     this.scene.add(hemi);
 
-    const ambient = new THREE.AmbientLight(0x8ab4d8, 0.35);
+    const ambient = new THREE.AmbientLight(0xbcd6ee, 0.55);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xffe0a0, 2.2);
+    const sun = new THREE.DirectionalLight(0xfff1c8, 2.6);
     sun.position.set(200, 400, -300);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 750;
-    sun.shadow.camera.left = -170;
-    sun.shadow.camera.right = 170;
-    sun.shadow.camera.top = 170;
-    sun.shadow.camera.bottom = -170;
+    // Tight ortho — the shadow camera now follows the player (see
+    // updateShadowFollow) so we don't need to cover the whole 340-unit map.
+    // At 60 units half-width with 1024 texels, that's ~9 texels per metre
+    // (vs ~3 with the old 170-unit bounds) — much sharper close-up shadows
+    // at no extra cost.
+    sun.shadow.camera.left = -60;
+    sun.shadow.camera.right = 60;
+    sun.shadow.camera.top = 60;
+    sun.shadow.camera.bottom = -60;
     sun.shadow.bias = -0.001;
     this.scene.add(sun);
+    // Target must live in the scene graph for transforms to update.
+    this.scene.add(sun.target);
+    // Expose for per-frame follow updates.
+    this._sun = sun;
+    this._sunOffset = new THREE.Vector3(200, 400, -300);
 
     const fill = new THREE.DirectionalLight(0xa0c8ff, 0.5);
     fill.position.set(-200, 100, 200);
@@ -311,7 +321,10 @@ export class World {
     // Sort largest-radius-first so smaller zones always apply last and win any overlap conflict.
     const flatZones = [
       { x:  100, z:    0, r: 90 },   // Cedar Creek
-      { x: -130, z:   50, r: 85 },   // Fort Ironwatch
+      { x: -118, z:   50, r: 55  },  // Frank's Jail — small radius so it applies AFTER
+                                      // Military Compound (r=88) and wins the overlap.
+                                      // Hard r=46.75 still covers the full compound footprint
+                                      // (max extent ~38 from centroid).
       { x:   35, z: -160, r: 90 },   // Ancient Temple
       { x:  -50, z:   80, r: 88 },   // Military Compound
       { x:  150, z:  -75, r: 100 },  // Olsen's Farm
@@ -681,17 +694,52 @@ export class World {
     }
     sc.addBox(110, h, -10,  1.3, 3.2, 1.3);
 
-    // ── Fort Ironwatch ───────────────────────────────────────────────
-    h = Math.max(0, this._getHeight(-130, 50));
-    place(this._makeFortIronwatch(), -130, 50, 'Fort Ironwatch');
-    sc.addBox(-130, h, 50,   4.5, 22, 4.5);
-    sc.addBox(-150, h, 30,   3.2, 12, 3.2);
-    sc.addBox(-110, h, 30,   3.2, 12, 3.2);
-    sc.addBox(-150, h, 70,   3.2, 12, 3.2);
-    sc.addBox(-110, h, 70,   3.2, 12, 3.2);
-    sc.addBox(-130, h, 30,   10,  5,  1.5);
-    sc.addBox(-130, h, 70,   10,  5,  1.5);
-    sc.addBox(-150, h, 50,   1.5, 5,  10);
+    // ── Frank's Jail ─────────────────────────────────────────────────
+    h = Math.max(0, this._getHeight(-128, 50));
+    place(this._makeFranksJail(), -128, 50, "Frank's Jail");
+    // Cellblock outer walls (center -128, 50; 20×30 with door gap on south)
+    sc.addBox(-128,    h, 65,    10,    8, 0.3);   // back wall
+    sc.addBox(-138,    h, 50,    0.3,   8, 15);    // west wall
+    sc.addBox(-118,    h, 50,    0.3,   8, 15);    // east wall
+    sc.addBox(-133.875,h, 35,    4.125, 8, 0.3);   // front-left of door
+    sc.addBox(-122.125,h, 35,    4.125, 8, 0.3);   // front-right of door
+    // 4 watchtowers at compound corners — base pillar (slightly shorter
+    // than 16 m so the balcony floor above can lift the player), balcony
+    // deck, and a vertical ladder mounted on the east face. Ladder params
+    // mirror _makeFranksJail's LADDER_*.
+    const towerWorlds = [[-141, 31], [-95, 31], [-141, 69], [-95, 69]];
+    const LADDER_RUNGS_C = 40;
+    const LADDER_RISE_C  = 0.4;
+    const LADDER_OFF_X_C = 1.7;
+    for (const [wx, wz] of towerWorlds) {
+      // Base column — height 15.7 keeps the top clear so the balcony deck
+      // floor (at h + 16.3) is reachable via auto-step from the top rung.
+      sc.addBox(wx, h, wz, 1.5, 15.7, 1.5);
+      // Balcony deck — walkable surface.
+      sc.addFloor(wx, h + 16.3, wz, 2.5, 2.5);
+      // Solid sheet just under the deck so bullets fired from below can't
+      // pass through and hit players standing on it. Sits 0.4 m below the
+      // deck top so it never wall-pushes a player whose feet are at h+16.3.
+      sc.addBox(wx, h + 15.85, wz, 2.5, 0.1, 2.5);
+      // Ladder: stacked floor colliders at the same (x, z). Walking into
+      // the ladder's footprint snaps the player up one rung per frame
+      // because each rung is within auto-step range of the one below.
+      for (let i = 0; i < LADDER_RUNGS_C; i++) {
+        sc.addFloor(
+          wx + LADDER_OFF_X_C, h + LADDER_RISE_C * (i + 1), wz,
+          0.5, 0.4,
+        );
+      }
+    }
+    // Yard fence (east, south, north of yard — west side is cellblock east wall)
+    sc.addBox(-97,     h, 50,    0.15, 5,  11);    // east fence
+    sc.addBox(-107,    h, 39,    10,   5,  0.15);  // south fence
+    sc.addBox(-107,    h, 61,    10,   5,  0.15);  // north fence
+    // Walkable surfaces — both the cellblock interior floor and the exercise
+    // yard. yFloor = h + 0.05 matches the slab top in _makeFranksJail so the
+    // player stands flush with the visible concrete pad.
+    sc.addFloor(-128, h + 0.05, 50, 10, 15);       // cellblock floor
+    sc.addFloor(-107, h + 0.05, 50, 10, 11);       // exercise yard floor
     sc.addBox(-110, h, 50,   1.5, 5,  10);
     // Barracks walls (w=10,h=4.5,d=8 → hw=5,hh=4.5,hd=4, doorW=2.2→dw=1.1)
     { const t=0.15,cx=-130,cz=63,hw=5,hh=4.5,hd=4,dw=1.1;
@@ -1097,7 +1145,7 @@ export class World {
 
     // Ground heights at each POI (sampled once)
     const hCC  = this._getHeight(100,   0);    // Cedar Creek
-    const hFI  = this._getHeight(-130,  50);   // Fort Ironwatch
+    const hFJ  = this._getHeight(-128,  50);   // Frank's Jail
     const hMC  = this._getHeight(-50,   80);   // Military Compound
     const hOF  = this._getHeight(150,  -75);   // Olsen's Farm
     const hWT  = this._getHeight(-125, -120);  // Whalen's Town
@@ -1124,14 +1172,9 @@ export class World {
     place(desk,      86,   ccY,  3.5,  0,              1);
     place(stool,     87.5, ccY,  3.5,  0,              1);
 
-    // ── Fort Ironwatch — barracks (local 0,13 → world -130, hFI, 63) ─
-    const fiY = hFI + fl;
-    place(bed,      -132,  fiY,  62,  Math.PI * 0.5,  1);
-    place(bedTwin,  -128,  fiY,  62,  Math.PI * 0.5,  1);
-    place(bedTwin,  -130,  fiY,  65,  Math.PI * 0.5,  1);
-    place(desk,     -126,  fiY,  64,  0,              1);
-    place(chair,    -126,  fiY,  63,  Math.PI,        1);
-    place(bookcase, -134,  fiY,  63,  Math.PI * 0.5,  1);
+    // ── Frank's Jail — cellblock has built-in concrete cots, no extra furniture ─
+    const fjY = hFJ + fl;
+    void fjY;
 
     // ── Military Compound — main bunker (world -50, hMC, 80) ──────
     const mcY = hMC + fl;
@@ -1674,9 +1717,61 @@ export class World {
     const load = path => new Promise((res, rej) =>
       loader.load(path, g => res(g.scene), null, rej));
 
+    // ── Building footprint exclusion zones ────────────────────────────────
+    // Axis-aligned rectangles (world coords) covering every enclosed building
+    // interior plus a small margin past the outer walls. Tree / bush / rock
+    // placement skips any position inside one of these so foliage never
+    // spawns inside houses, cabins, or other shells. Each entry is
+    // [xMin, xMax, zMin, zMax]. Add new buildings here when they're built.
+    const FOOTPRINT_MARGIN = 1.0;  // extra metres around each rectangle
+    const buildings = [
+      // ── Cedar Creek ──
+      [ 93,   107,  -4.5,  4.5 ],   // main cabin (14×9 @ 100,0)
+      [ 82.5, 89.5,  1,    7   ],   // shed (7×6 @ 86,4)
+      [110,   118, -17,  -11   ],   // guest cabin (8×6 @ 114,-14)
+      // ── Frank's Jail ──
+      [-138, -118, 35,    65   ],   // cellblock (20×30 @ -128,50)
+      [-117,  -97, 39,    61   ],   // exercise yard (20×22 @ -107,50)
+      // ── Military Compound ──
+      [ -59,  -41, 74,    86   ],   // main bunker (18×12 @ -50,80)
+      [ -74,  -62, 68,    76   ],   // secondary bunker (12×8 @ -68,72)
+      // ── Olsen's Farm ──
+      [144,   156, -79.5, -70.5],   // farmhouse (12×9 @ 150,-75)
+      [162,   178, -82,   -72  ],   // barn 1 (16×10 @ 170,-77)
+      [128,   138, -79,   -71  ],   // barn 2 (10×8 @ 133,-75)
+      // ── Whalen's Town ── (north & south rows of 8 houses)
+      [-148.5,-141.5,-131,-125],    // house @ -145,-128 (7×6)
+      [-136,  -130, -130.5,-125.5], // house @ -133,-128 (6×5)
+      [-123,  -115, -131,  -125],   // house @ -119,-128 (8×6)
+      [-110,  -104, -130.5,-125.5], // house @ -107,-128 (6×5)
+      [-148.5,-141.5,-115, -109],   // house @ -145,-112 (7×6)
+      [-136,  -130, -114.5,-109.5], // house @ -133,-112 (6×5)
+      [-123,  -115, -115,  -109],   // house @ -119,-112 (8×6)
+      [-110,  -104, -114.5,-109.5], // house @ -107,-112 (6×5)
+      [-129,  -121, -147,  -137  ], // church (8×10 @ -125,-142)
+      [-133,  -117, -104,  -92   ], // town hall (16×12 @ -125,-98)
+      [-108,   -98, -124,  -116  ], // tavern (10×8 @ -103,-120)
+      [-151,  -143, -123.5,-116.5], // blacksmith (8×7 @ -147,-120)
+      // ── Samuel's Mansion ──
+      [ 174,  206,  106,   134  ],  // basement / main footprint (32×28 @ 190,120)
+    ];
+
+    // Returns true if (wx, wz) lies inside any building footprint (with margin).
+    const isInsideBuilding = (wx, wz) => {
+      const m = FOOTPRINT_MARGIN;
+      for (const b of buildings) {
+        if (wx >= b[0] - m && wx <= b[1] + m &&
+            wz >= b[2] - m && wz <= b[3] + m) return true;
+      }
+      return false;
+    };
+
     // Collect placements per model, then instance them all at the end.
     const _placements = new Map();
     const placeNature = (model, wx, wz, rotY = 0, scale = 1) => {
+      // Skip anything overlapping a building interior so trees don't spawn
+      // inside houses, the jail, bunkers, etc.
+      if (isInsideBuilding(wx, wz)) return;
       const wy = this._getHeight(wx, wz);
       if (wy < 0) return;
       let arr = _placements.get(model);
@@ -1813,12 +1908,11 @@ export class World {
       { x: -18,  z:  82,  m: pine2,       r: PI*0.9,   s: 1.1 },
       { x: -30,  z:  95,  m: twistedTree, r: PI*0.2,   s: 0.9 },
       { x: -38,  z: 100,  m: pine3,       r: PI*1.0,   s: 1.0 },
-      // Fort Ironwatch surroundings
-      { x: -100, z:  28,  m: pine,        r: 0,        s: 1.2 },
-      { x: -108, z:  35,  m: tree,        r: PI*0.7,   s: 1.0 },
-      { x: -96,  z:  42,  m: pine2,       r: PI*1.3,   s: 1.1 },
-      { x: -108, z:  68,  m: twistedTree, r: PI*0.4,   s: 1.0 },
-      { x: -100, z:  75,  m: pine3,       r: PI*0.8,   s: 1.2 },
+      // Frank's Jail surroundings (kept outside compound footprint)
+      { x: -98,  z:  28,  m: pine,        r: 0,        s: 1.2 },
+      { x: -100, z:  72,  m: twistedTree, r: PI*0.4,   s: 1.0 },
+      { x: -148, z:  30,  m: pine2,       r: PI*1.3,   s: 1.1 },
+      { x: -150, z:  70,  m: pine3,       r: PI*0.8,   s: 1.2 },
       // Whalen's Town approach
       { x: -100, z: -105, m: pine,        r: PI*1.0,   s: 1.0 },
       { x: -95,  z: -115, m: pine2,       r: PI*0.3,   s: 1.1 },
@@ -1960,122 +2054,207 @@ export class World {
     return g;
   }
 
-  _makeFortIronwatch() {
+  _makeFranksJail() {
     const g = new THREE.Group();
-    const stoneMat  = new THREE.MeshLambertMaterial({ color: 0x7a7a72 });
-    const darkStone = new THREE.MeshLambertMaterial({ color: 0x505048 });
-    const woodMat   = new THREE.MeshLambertMaterial({ color: 0x6a4a28 });
-    const roofMat   = new THREE.MeshLambertMaterial({ color: 0x3a3030 });
+    const concrete     = new THREE.MeshLambertMaterial({ color: 0x8a8a86 });
+    const darkConcrete = new THREE.MeshLambertMaterial({ color: 0x5a5a56 });
+    const barsMat      = new THREE.MeshLambertMaterial({ color: 0x33363c });
+    const barbedMat    = new THREE.MeshLambertMaterial({ color: 0x222222 });
+    const fenceMat     = new THREE.MeshLambertMaterial({ color: 0x4a4a4a });
+    const yardMat      = new THREE.MeshLambertMaterial({ color: 0x6a6258 });
+    const lightMat     = new THREE.MeshLambertMaterial({
+      color: 0xfff0a0, emissive: 0xffcc66, emissiveIntensity: 1.0,
+    });
+    const slitMat = new THREE.MeshBasicMaterial({ color: 0x111416 });
 
-    const makeTower = (x, z, r, h) => {
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(r, r*1.1, h, 8), stoneMat);
-      body.position.set(x, h/2, z); body.castShadow = true; g.add(body);
-      for (let i = 0; i < 8; i++) {
-        const angle = (i/8)*Math.PI*2;
-        const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1.8, 1), stoneMat);
-        m.position.set(x + Math.cos(angle)*(r-0.3), h+0.9, z + Math.sin(angle)*(r-0.3)); g.add(m);
+    // ── Cellblock (20 wide × 30 deep × 8 tall, door faces −Z) ────────────
+    // Floor slab is buried so its top sits right at terrain level (y=0.05
+    // local just to avoid z-fighting with the terrain mesh). The slab body
+    // extends 1.5m down to mask any minor terrain noise at the building edges.
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(20, 1.5, 30), darkConcrete);
+    floor.position.set(0, -0.7, 0); floor.receiveShadow = true; g.add(floor);
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(20, 0.4, 30), concrete);
+    roof.position.set(0, 8.2, 0); roof.castShadow = true; g.add(roof);
+
+    // Outer walls — 0.6m thick, 8m tall
+    const wallBack = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 0.6), concrete);
+    wallBack.position.set(0, 4, 15); wallBack.castShadow = true; g.add(wallBack);
+    const wallW = new THREE.Mesh(new THREE.BoxGeometry(0.6, 8, 30), concrete);
+    wallW.position.set(-10, 4, 0); wallW.castShadow = true; g.add(wallW);
+    const wallE = new THREE.Mesh(new THREE.BoxGeometry(0.6, 8, 30), concrete);
+    wallE.position.set(10, 4, 0); wallE.castShadow = true; g.add(wallE);
+    // Front wall with 3.5m door gap
+    const frontL = new THREE.Mesh(new THREE.BoxGeometry(8.25, 8, 0.6), concrete);
+    frontL.position.set(-5.875, 4, -15); g.add(frontL);
+    const frontR = new THREE.Mesh(new THREE.BoxGeometry(8.25, 8, 0.6), concrete);
+    frontR.position.set(5.875, 4, -15); g.add(frontR);
+    const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.5, 2.5, 0.6), darkConcrete);
+    lintel.position.set(0, 6.75, -15); g.add(lintel);
+
+    // ── Cell partitions (perpendicular to corridor) ──────────────────────
+    // 3 cells per side, separators at z = -13.5, -4.5, 4.5, 13.5
+    const partZ = [-13.5, -4.5, 4.5, 13.5];
+    for (const cz of partZ) {
+      const wp = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 0.4), concrete);
+      wp.position.set(-6, 4, cz); g.add(wp);
+      const ep = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 0.4), concrete);
+      ep.position.set(6, 4, cz); g.add(ep);
+    }
+
+    // Vertical bars facing the corridor (skip middle 2m for cell door)
+    const makeBars = (x) => {
+      for (let i = 0; i < 3; i++) {
+        const z0 = partZ[i], z1 = partZ[i+1];
+        const zMid = (z0 + z1) / 2;
+        const barCount = 14;
+        for (let b = 0; b < barCount; b++) {
+          const t = b / (barCount - 1);
+          const z = z0 + 0.4 + (z1 - z0 - 0.8) * t;
+          if (z > zMid - 1 && z < zMid + 1) continue;
+          const bar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 7.5, 0.12), barsMat);
+          bar.position.set(x, 3.75, z); g.add(bar);
+        }
+        // Horizontal crossbars (top + mid)
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, z1 - z0 - 0.6), barsMat);
+        top.position.set(x, 7.4, zMid); g.add(top);
+        const mid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, z1 - z0 - 0.6), barsMat);
+        mid.position.set(x, 3.75, zMid); g.add(mid);
       }
-      const plat = new THREE.Mesh(new THREE.CylinderGeometry(r+0.3, r+0.3, 0.4, 8), darkStone);
-      plat.position.set(x, h+0.2, z); g.add(plat);
     };
+    makeBars(-2);
+    makeBars( 2);
 
-    const makeWall = (x, z, w, h, d) => {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), stoneMat);
-      wall.position.set(x, h/2, z); wall.castShadow = true; wall.receiveShadow = true; g.add(wall);
-      // Battlements along top
-      const isWide = w > d;
-      const count = Math.floor((isWide ? w : d) / 2.5);
-      for (let i = 0; i < count; i++) {
-        const m = new THREE.Mesh(new THREE.BoxGeometry(isWide?1.2:d+0.4, 1.4, isWide?w/count*0.5:1.2), stoneMat);
-        const offset = -((isWide?w:d)/2) + i*((isWide?w:d)/count) + (isWide?w:d)/(count*2);
-        m.position.set(isWide ? offset+x : x, h+0.7, isWide ? z : offset+z); g.add(m);
-      }
-    };
-
-    // Main keep
-    makeTower(0, 0, 4.5, 20);
-    // 4 corner towers
-    makeTower(-20, -20, 3.2, 12);
-    makeTower( 20, -20, 3.2, 12);
-    makeTower(-20,  20, 3.2, 12);
-    makeTower( 20,  20, 3.2, 12);
-
-    // Curtain walls
-    makeWall(-10, -20, 18, 5, 3);
-    makeWall( 10, -20, 18, 5, 3);
-    makeWall(-10,  20, 18, 5, 3);
-    makeWall( 10,  20, 18, 5, 3);
-    makeWall(-20, -10, 3, 5, 18);
-    makeWall(-20,  10, 3, 5, 18);
-    makeWall( 20, -10, 3, 5, 18);
-    makeWall( 20,  10, 3, 5, 18);
-
-    // Gatehouse (south)
-    const gate = new THREE.Mesh(new THREE.BoxGeometry(8, 7, 6), stoneMat);
-    gate.position.set(0, 3.5, -22); gate.castShadow = true; g.add(gate);
-    const gateArch = new THREE.Mesh(new THREE.BoxGeometry(3.2, 4.5, 0.4), darkStone);
-    gateArch.position.set(0, 2.25, -25.1); g.add(gateArch);
-    for (const ox of [-2.5, 0, 2.5]) {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2, 1.5), stoneMat);
-      m.position.set(ox, 7.5, -22); g.add(m);
-    }
-
-    // Barracks
-    const barracksShell = this._hollowBox(10, 4.5, 8, woodMat, 2.2, 3.0); barracksShell.position.set(0, 0, 13); g.add(barracksShell);
-    const bRoof = new THREE.Mesh(new THREE.ConeGeometry(7, 3, 4), roofMat);
-    bRoof.position.set(0, 5.75, 13); bRoof.rotation.y = Math.PI/4; g.add(bRoof);
-    const bFloor = new THREE.Mesh(new THREE.BoxGeometry(9.8, 0.15, 7.8), woodMat);
-    bFloor.position.set(0, 0.07, 13); g.add(bFloor);
-
-    // Armory
-    const armoryShell = this._hollowBox(6, 4, 5, stoneMat, 2.0, 3.0); armoryShell.position.set(-12, 0, 13); g.add(armoryShell);
-    const aFloor = new THREE.Mesh(new THREE.BoxGeometry(5.8, 0.15, 4.8), stoneMat);
-    aFloor.position.set(-12, 0.07, 13); g.add(aFloor);
-
-    // Well in courtyard
-    const wellRim = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.3, 0.9, 10), stoneMat);
-    wellRim.position.set(10, 0.45, -5); g.add(wellRim);
-    const wellTop = new THREE.Mesh(new THREE.TorusGeometry(1.1, 0.12, 6, 14), stoneMat);
-    wellTop.rotation.x = Math.PI/2; wellTop.position.set(10, 0.92, -5); g.add(wellTop);
-    for (const ox of [-0.85, 0.85]) {
-      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 2.2, 6), woodMat);
-      post.position.set(10+ox, 2, -5); g.add(post);
-    }
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.7, 6), woodMat);
-    bar.rotation.z = Math.PI/2; bar.position.set(10, 2.8, -5); g.add(bar);
-
-    // Wooden stairs to keep
-    for (let i = 0; i < 5; i++) {
-      const step = new THREE.Mesh(new THREE.BoxGeometry(3, 0.35, 0.8), woodMat);
-      step.position.set(0, i*0.35, -(4.5 + i*0.8)); g.add(step);
-    }
-
-    // Crates & barrels
-    const crateMat = new THREE.MeshLambertMaterial({ color: 0x8a6030 });
-    const barrelMat = new THREE.MeshLambertMaterial({ color: 0x6a4020 });
-    for (let i = 0; i < 4; i++) {
-      const crate = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2), crateMat);
-      crate.position.set(-8 + i*2.5, 0.6, 5); g.add(crate);
-    }
+    // Concrete cot in each cell (along outer wall)
     for (let i = 0; i < 3; i++) {
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.45, 1.1, 10), barrelMat);
-      barrel.position.set(14, 0.55, i*1.5 - 2); g.add(barrel);
+      const zMid = (partZ[i] + partZ[i+1]) / 2;
+      const cotW = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.5, 6.5), darkConcrete);
+      cotW.position.set(-8, 0.75, zMid); g.add(cotW);
+      const cotE = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.5, 6.5), darkConcrete);
+      cotE.position.set(8, 0.75, zMid); g.add(cotE);
     }
 
-    // Arrow slits on keep
-    for (let i = 0; i < 6; i++) {
-      const angle = (i/6)*Math.PI*2;
-      const slit = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1.8, 0.2), darkStone);
-      slit.position.set(Math.cos(angle)*4.6, 10, Math.sin(angle)*4.6);
-      slit.rotation.y = angle; g.add(slit);
+    // Corridor fluorescent strip lights
+    for (let i = 0; i < 5; i++) {
+      const z = -12 + i * 6;
+      const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 2.5), lightMat);
+      lamp.position.set(0, 7.9, z); g.add(lamp);
     }
 
-    // Torches on walls
-    const torchMat = new THREE.MeshLambertMaterial({ color: 0xff6600, emissive: 0xff3300, emissiveIntensity: 0.9 });
-    for (const [tx, tz] of [[-19,-19],[19,-19],[-19,19],[19,19],[0,-21],[0,21]]) {
-      const flame = new THREE.Mesh(new THREE.SphereGeometry(0.28, 6, 5), torchMat);
-      flame.position.set(tx, 6.5, tz); g.add(flame);
-    }
+    // "FRANK'S JAIL" sign over door
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(11, 2, 0.25), darkConcrete);
+    sign.position.set(0, 9.5, -15.15); g.add(sign);
+
+    // ── Exercise yard (east of cellblock, fenced) ────────────────────────
+    // Same trick: buried slab with top a hair above terrain.
+    const yardFloor = new THREE.Mesh(new THREE.BoxGeometry(20, 1, 22), yardMat);
+    yardFloor.position.set(21, -0.45, 0); yardFloor.receiveShadow = true; g.add(yardFloor);
+
+    const fencePost = (x, z) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 5, 0.3), fenceMat);
+      post.position.set(x, 2.5, z); g.add(post);
+    };
+    const fencePanel = (x, z, w, vertical) => {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(w, 4.6),
+        new THREE.MeshBasicMaterial({ color: 0x555555, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+      );
+      m.position.set(x, 2.5, z);
+      if (vertical) m.rotation.y = Math.PI / 2;
+      g.add(m);
+    };
+    // East fence (x=31, z=-11..11)
+    for (let i = 0; i <= 11; i++) fencePost(31, -11 + i * 2);
+    fencePanel(31, 0, 22, true);
+    // South fence (z=-11, x=11..31)
+    for (let i = 0; i <= 10; i++) fencePost(11 + i * 2, -11);
+    fencePanel(21, -11, 20, false);
+    // North fence (z=11, x=11..31)
+    for (let i = 0; i <= 10; i++) fencePost(11 + i * 2, 11);
+    fencePanel(21, 11, 20, false);
+
+    // Barbed wire across fence tops
+    const barbedTop = (x, z, len, alongX) => {
+      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, len, 5), barbedMat);
+      m.position.set(x, 5.1, z);
+      if (alongX) m.rotation.z = Math.PI / 2;
+      else m.rotation.x = Math.PI / 2;
+      g.add(m);
+    };
+    barbedTop(31, 0, 22, false);
+    barbedTop(21, -11, 20, true);
+    barbedTop(21,  11, 20, true);
+
+    // Basketball hoop in yard
+    const hoopPost = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 5, 8), darkConcrete);
+    hoopPost.position.set(28, 2.5, 0); g.add(hoopPost);
+    const backboard = new THREE.Mesh(
+      new THREE.BoxGeometry(0.18, 1.8, 2.6),
+      new THREE.MeshLambertMaterial({ color: 0xddd5b5 })
+    );
+    backboard.position.set(27.5, 4.5, 0); g.add(backboard);
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(0.5, 0.06, 6, 14),
+      new THREE.MeshLambertMaterial({ color: 0xff4400 })
+    );
+    rim.rotation.x = Math.PI / 2; rim.position.set(26.8, 4, 0); g.add(rim);
+
+    // ── 4 watchtowers at compound corners ────────────────────────────────
+    // Each tower: solid 16 m base pillar with a vertical ladder mounted on
+    // the east face, leading to an open balcony deck under a canopy roof.
+    // The balcony is a sniper perch — players can stand on it but cannot
+    // enter an interior (there is none). Ladder params are mirrored
+    // verbatim by the collision setup in _buildStructures.
+    const LADDER_RUNGS = 40;            // 40 × 0.4 m = 16 m total climb
+    const LADDER_RISE  = 0.4;
+    const LADDER_OFF_X = 1.7;           // distance from tower centre (east face)
+
+    const makeWatchtower = (x, z) => {
+      // Solid base
+      const base = new THREE.Mesh(new THREE.BoxGeometry(3, 16, 3), concrete);
+      base.position.set(x, 8, z); base.castShadow = true; g.add(base);
+
+      // Vertical ladder on the east face — two side rails and horizontal
+      // rungs. Player walks into it and the stacked collision floors lift
+      // them to the balcony level.
+      const rail = (dz) => {
+        const r = new THREE.Mesh(new THREE.BoxGeometry(0.08, 16.2, 0.08), darkConcrete);
+        r.position.set(x + LADDER_OFF_X, 8.1, z + dz);
+        g.add(r);
+      };
+      rail(-0.3);
+      rail( 0.3);
+      for (let i = 0; i < LADDER_RUNGS; i++) {
+        const ry = LADDER_RISE * (i + 1);
+        const rung = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.7), darkConcrete);
+        rung.position.set(x + LADDER_OFF_X, ry, z);
+        g.add(rung);
+      }
+
+      // Balcony deck (open platform replacing the old booth).
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(5, 0.3, 5), concrete);
+      deck.position.set(x, 16.15, z); deck.receiveShadow = true; g.add(deck);
+
+      // Corner posts holding the canopy roof.
+      for (const [dx, dz] of [[-2.35,-2.35],[2.35,-2.35],[-2.35,2.35],[2.35,2.35]]) {
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.8, 0.3), darkConcrete);
+        post.position.set(x + dx, 17.7, z + dz); post.castShadow = true; g.add(post);
+      }
+
+      // Canopy roof above
+      const canopy = new THREE.Mesh(new THREE.BoxGeometry(5.5, 0.3, 5.5), concrete);
+      canopy.position.set(x, 19.25, z); canopy.castShadow = true; g.add(canopy);
+
+      // Searchlight mounted on one of the corner posts.
+      const sl = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 0.7, 8), lightMat);
+      sl.rotation.z = Math.PI / 2;
+      sl.position.set(x + (x < 10 ? 2 : -2), 18, z);
+      g.add(sl);
+    };
+    makeWatchtower(-13, -19);
+    makeWatchtower( 33, -19);
+    makeWatchtower(-13,  19);
+    makeWatchtower( 33,  19);
 
     return g;
   }
@@ -2738,5 +2917,25 @@ export class World {
       });
     }
     if (this._waterMat) this._waterMat.uniforms.time.value += dt;
+  }
+
+  /**
+   * Move the sun's shadow camera so its tight orthographic frustum stays
+   * centred on the player. Without this the sharper bounds set in
+   * _buildLights would only catch shadows near origin. Snapping to whole
+   * texels in light-space avoids the "shadow shimmer" while the camera
+   * follows a continuously moving target.
+   */
+  updateShadowFollow(playerX, playerZ) {
+    if (!this._sun) return;
+    // Snap to the texel size in light-space so shadows don't crawl as the
+    // camera follows the player. World units per shadow texel:
+    const worldPerTexel = (this._sun.shadow.camera.right - this._sun.shadow.camera.left) /
+                          this._sun.shadow.mapSize.x;
+    const sx = Math.round(playerX / worldPerTexel) * worldPerTexel;
+    const sz = Math.round(playerZ / worldPerTexel) * worldPerTexel;
+    this._sun.position.set(sx + this._sunOffset.x, this._sunOffset.y, sz + this._sunOffset.z);
+    this._sun.target.position.set(sx, 0, sz);
+    this._sun.target.updateMatrixWorld();
   }
 }

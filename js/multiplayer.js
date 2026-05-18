@@ -1,18 +1,31 @@
 import * as THREE from 'three';
 
-// ── Spawn points for up to 10 players — one per POI region + mid-map extras ──
-// Each point is 60+ units from every other point and on flat reachable terrain.
+// ── Spawn points for up to 20 players — POI regions + mid-map + edges ──
+// Each point is on flat reachable terrain, spaced to avoid spawn-clusters.
 export const MP_SPAWNS = [
+  // POI-adjacent (original 6)
   [  80,   15 ],  // Cedar Creek side
-  [ -110,   35 ],  // Fort Ironwatch side
+  [ -108,   35 ],  // Frank's Jail side
   [  55, -140 ],  // Ancient Temple side
   [ -70,   95 ],  // Military Compound side
   [ 140,  -90 ],  // Olsen's Farm side
   [ -105, -105 ],  // Whalen's Town side
-  [   0,  120 ],  // north mid-map
-  [   0, -120 ],  // south mid-map
-  [ 120,   60 ],  // northeast
-  [ -120,  -40 ],  // west-central
+  // Mid-map cardinal extras (original 4)
+  [   0,  120 ],
+  [   0, -120 ],
+  [ 120,   60 ],
+  [ -120,  -40 ],
+  // Outer ring (added for 11–20)
+  [  170,    0 ],  // east coast
+  [ -170,   80 ],  // far west
+  [   80,  170 ],  // far north-east
+  [  -40, -180 ],  // far south
+  [  200,  170 ],  // NE corner
+  [ -190, -160 ],  // SW corner
+  [   40,   60 ],  // central north
+  [  -45,  -40 ],  // central south
+  [  165, -150 ],  // SE corner
+  [  -60,  150 ],  // mid-north
 ];
 
 // ── Remote Player (3D character + name tag, driven by network) ────────────────
@@ -118,10 +131,26 @@ export class RemotePlayer {
     if (hud) hud.appendChild(this._tag);
   }
 
-  setTargetState(pos, yaw, phase) {
+  setTargetState(pos, yaw, phase, weapon, ammo, reserve) {
     this._targetPos.set(pos[0], pos[1], pos[2]);
     this._targetYaw = yaw;
     if (phase !== undefined) this.phase = phase;
+    // Held-weapon snapshot for spectator HUD. Null when the remote is on
+    // a consumable slot or hasn't transmitted yet.
+    this.weaponId = weapon ?? null;
+    this.ammo     = ammo    ?? null;
+    this.reserve  = reserve ?? null;
+  }
+
+  /**
+   * Apply teammate visuals: HP bar turns green, nametag gets a CSS class
+   * the stylesheet can theme. Called from NetworkManager.spawnRemotePlayers
+   * once team membership is known. Idempotent — safe to call again.
+   */
+  setTeammate(isTeammate) {
+    this.isTeammate = !!isTeammate;
+    if (this._hpFill) this._hpFill.material.color.setHex(isTeammate ? 0x22dd66 : 0xee2222);
+    if (this._tag) this._tag.classList.toggle('teammate', !!isTeammate);
   }
 
   takeDamage(amount) {
@@ -199,6 +228,13 @@ export class NetworkManager {
     this._scene         = null;
     this._killCounts    = new Map(); // id → kills
     this.gameStartTime  = null;      // performance.now() when gameStart arrived
+    this.gameActive     = false;     // server-reported: is a match running right now?
+    this.matchMode      = 'solo';    // 'solo' (FFA) or 'duo' (teams of 2)
+    this.teams          = {};        // { playerId: teamId } — populated in duo mode
+    this.myTeamId       = null;      // convenience: this.teams[this.myId]
+    this.inGameIds      = new Set(); // ids currently in the running match
+    this.worldSeed      = null;      // 32-bit seed shared by all clients for
+                                     // deterministic world-loot placement
 
     // Callbacks wired by Menu / Game
     this.onWelcome      = null;
@@ -213,6 +249,23 @@ export class NetworkManager {
     this.onRemoteDeath  = null;
     this.onLocalHit     = null; // (damage, fromId) → void
     this.onRemoteBuild  = null; // (msg) => void
+
+    // Supply-drop sync callbacks (set by SupplyDropManager).
+    // `supplyDropSpawn` is host-authored — non-hosts ignore the spawn timer
+    // and only render drops the host announces. `supplyDropOpen` is any-client
+    // → server → all-clients so opens propagate everywhere.
+    this.onSupplyDropSpawn = null; // (msg) => void
+    this.onSupplyDropOpen  = null; // (msg) => void
+
+    // Fires when the server reports the running match has ended (winner
+    // declared, last player disconnected, explicit matchEnd). Late joiners
+    // refresh their lobby; spectator sessions reload to clean up.
+    this.onMatchEnded = null; // () => void
+
+    // A remote player threw a weapon on the ground — host spawns a world
+    // pickup with the broadcast ammo state so spectators + other players
+    // can see and re-collect it.
+    this.onWeaponDropped = null; // (msg) => void
   }
 
   connect(url) {
@@ -234,24 +287,74 @@ export class NetworkManager {
 
   setName(name)          { this.myName = name; this.send({ type: 'setName', name }); }
   setReady(ready)        { this.send({ type: 'ready', value: ready }); }
-  startGame()            { this.send({ type: 'startGame' }); }
-  sendState(pos, yaw, phase = 3) { this.send({ type: 'state', pos: [pos.x, pos.y, pos.z], yaw, phase }); }
+  /**
+   * Host only. `matchMode` is 'solo' or 'duo'. `teams` is a {playerId: teamId}
+   * map (only meaningful for duo). The server forwards both verbatim in the
+   * gameStart broadcast so every client agrees on team membership.
+   */
+  startGame(matchMode = 'solo', teams = {}) {
+    this.send({ type: 'startGame', matchMode, teams });
+  }
+  /** Any in-game client may declare match end (victory / spectator-end). */
+  sendMatchEnd() { this.send({ type: 'matchEnd' }); }
+  /**
+   * Broadcast our state. `weapon` (def id), `ammo` (loaded mag) and
+   * `reserve` (shared-pool reserve for the held weapon's ammoType) are
+   * optional but required for spectators to see live ammo readouts.
+   */
+  sendState(pos, yaw, phase = 3, weapon = null, ammo = null, reserve = null) {
+    this.send({
+      type: 'state',
+      pos: [pos.x, pos.y, pos.z], yaw, phase,
+      weapon, ammo, reserve,
+    });
+  }
   sendShoot(orig, dir, weapon) { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z], weapon }); }
   sendHit(targetId, dmg) { this.send({ type: 'hit', targetId, damage: dmg }); }
   sendDeath()            { this.send({ type: 'death' }); }
   sendBuild(pieceType, x, y, z, rotY) { this.send({ type: 'build', pieceType, x, y, z, rotY }); }
+
+  /**
+   * Notify others that we just dropped a weapon at `pos` with the given
+   * loaded mag + reserve. Other clients spawn a matching WeaponPickup so
+   * the dropped gun is visible (and re-collectable) for everyone.
+   */
+  sendWeaponDropped(weaponId, pos, ammo, reserve) {
+    this.send({
+      type: 'weaponDropped',
+      weaponId,
+      pos: [pos.x, pos.y, pos.z],
+      ammo, reserve,
+    });
+  }
+
+  // Supply-drop sync.
+  sendSupplyDropSpawn(data) { this.send({ type: 'supplyDropSpawn', ...data }); }
+  sendSupplyDropOpen(id)    { this.send({ type: 'supplyDropOpen', dropId: id }); }
 
   _handle(msg) {
     switch (msg.type) {
       case 'welcome':
         this.myId   = msg.id;
         this.isHost = msg.isHost;
-        for (const p of msg.players) this.players.set(p.id, p);
+        this.gameActive = !!msg.gameActive;
+        this.inGameIds = new Set(msg.inGameIds ?? []);
+        for (const p of msg.players) this.players.set(p.id, { ...p, inGame: !!p.inGame });
+        // Late-spectator storm sync: server reports how long the match has
+        // been running, and we plant gameStartTime that many ms in the past
+        // so storm.setClockStart() (called later in Game._loadWorld) lands
+        // on the correct phase/radius.
+        if (this.gameActive && typeof msg.matchElapsedMs === 'number') {
+          this.gameStartTime = performance.now() - msg.matchElapsedMs;
+        }
+        if (typeof msg.worldSeed === 'number') this.worldSeed = msg.worldSeed;
         if (this.onWelcome) this.onWelcome(msg);
         break;
 
       case 'playerJoined':
-        this.players.set(msg.id, { id: msg.id, name: msg.name, ready: false });
+        this.players.set(msg.id, {
+          id: msg.id, name: msg.name, ready: false, inGame: !!msg.inGame,
+        });
         if (this.onPlayerJoined) this.onPlayerJoined(msg);
         break;
 
@@ -288,12 +391,34 @@ export class NetworkManager {
         // Anchor the shared storm clock — gameStart is broadcast to every
         // client at once, so this moment is the same for everyone (±latency).
         this.gameStartTime = performance.now();
+        this.gameActive    = true;
+        this.matchMode     = msg.matchMode ?? 'solo';
+        this.teams         = msg.teams     ?? {};
+        this.myTeamId      = this.teams[this.myId] ?? null;
+        this.inGameIds     = new Set(msg.inGameIds ?? []);
+        if (typeof msg.worldSeed === 'number') this.worldSeed = msg.worldSeed;
+        // Mark each player as in-game / lobby so the lobby UI can recolor.
+        for (const p of this.players.values()) p.inGame = this.inGameIds.has(p.id);
         if (this.onGameStart) this.onGameStart(msg);
+        break;
+
+      case 'matchEnded':
+        // Server says the running match is over (winner / all-disconnected /
+        // explicit end). Reset team state so the next match starts clean.
+        this.gameActive = false;
+        this.matchMode  = 'solo';
+        this.teams      = {};
+        this.myTeamId   = null;
+        this.inGameIds  = new Set();
+        for (const p of this.players.values()) p.inGame = false;
+        if (this.onMatchEnded) this.onMatchEnded();
         break;
 
       case 'state':
         if (this.remotePlayers.has(msg.id)) {
-          this.remotePlayers.get(msg.id).setTargetState(msg.pos, msg.yaw, msg.phase);
+          this.remotePlayers.get(msg.id).setTargetState(
+            msg.pos, msg.yaw, msg.phase, msg.weapon, msg.ammo, msg.reserve,
+          );
         }
         if (this.onRemoteState) this.onRemoteState(msg);
         break;
@@ -324,6 +449,18 @@ export class NetworkManager {
       case 'build':
         if (this.onRemoteBuild) this.onRemoteBuild(msg);
         break;
+
+      case 'supplyDropSpawn':
+        if (this.onSupplyDropSpawn) this.onSupplyDropSpawn(msg);
+        break;
+
+      case 'supplyDropOpen':
+        if (this.onSupplyDropOpen) this.onSupplyDropOpen(msg);
+        break;
+
+      case 'weaponDropped':
+        if (this.onWeaponDropped) this.onWeaponDropped(msg);
+        break;
     }
   }
 
@@ -336,14 +473,58 @@ export class NetworkManager {
       const rp  = new RemotePlayer(scene, id, info.name);
       rp.root.position.copy(spawnPoints[idx]);
       rp._targetPos.copy(spawnPoints[idx]);
+      // Mark teammates so projectiles + damage filtering can skip them.
+      // In solo (FFA) this is always false; in duo it's true when the
+      // remote player shares this client's team id. Applying via setter
+      // also recolors the HP bar and tags the nametag for CSS theming.
+      rp.setTeammate(this.matchMode === 'duo'
+        && this.myTeamId != null
+        && this.teams[id] === this.myTeamId);
       this.remotePlayers.set(id, rp);
     }
+  }
+
+  /** Returns true if the given player id is on the local player's team. */
+  isTeammate(id) {
+    if (this.matchMode !== 'duo' || this.myTeamId == null) return false;
+    return this.teams[id] === this.myTeamId;
   }
 
   getRemotePlayers() { return this.remotePlayers; }
 
   aliveRemoteCount() {
     return [...this.remotePlayers.values()].filter(r => !r.dead).length;
+  }
+
+  /**
+   * Number of remote players who are alive AND not on the local player's
+   * team. In Solo (FFA) this equals aliveRemoteCount(). In Duo, teammates
+   * are excluded so "victory" fires when the opposing teams are wiped out.
+   */
+  aliveOpponentCount() {
+    let n = 0;
+    for (const rp of this.remotePlayers.values()) {
+      if (rp.dead) continue;
+      if (this.matchMode === 'duo' && rp.isTeammate) continue;
+      n++;
+    }
+    return n;
+  }
+
+  /**
+   * Initial opponent total — used as the HUD "enemies remaining" denominator.
+   * Computed from the lobby roster at match-start time (callers should latch
+   * this once when the match begins).
+   */
+  totalOpponentCount() {
+    if (this.matchMode !== 'duo') return Math.max(0, this.players.size - 1);
+    let n = 0;
+    for (const id of this.players.keys()) {
+      if (id === this.myId) continue;
+      if (this.teams[id] === this.myTeamId) continue;
+      n++;
+    }
+    return n;
   }
 
   update(dt, camera, canvas) {

@@ -84,7 +84,7 @@ export class HUD {
         name.textContent = item.def.name;
         ammo.textContent = item.reloading
           ? 'Reloading...'
-          : `${item.ammo} / ${item.reserve}`;
+          : `${item.ammo} / ${item.displayReserve}`;
         el.style.borderColor = i === active ? '#fff' : c + '88';
       }
     }
@@ -98,7 +98,7 @@ export class HUD {
       document.getElementById('ammo-reserve').textContent = `x${activeItem.count}`;
     } else {
       document.getElementById('ammo-current').textContent = activeItem.reloading ? 'RLD' : activeItem.ammo;
-      document.getElementById('ammo-reserve').textContent = activeItem.reserve;
+      document.getElementById('ammo-reserve').textContent = activeItem.displayReserve;
     }
   }
 
@@ -289,6 +289,12 @@ export class HUD {
   // ── Public API ────────────────────────────────────────────────────────────
   setWeaponSystem(ws)  { this._weaponSystem  = ws; }
   setPickupManager(pm) { this._pickupManager = pm; }
+  // Used to swap the minimap enemy source between solo (EnemyManager) and
+  // zombie mode (ZombieWaveManager). Both expose `.enemies[]`.
+  setEnemyManager(em)  { this.enemyManager   = em; }
+  // Multiplayer: needed so the minimap can render remote players with
+  // teammate coloring. Solo / zombie modes leave this null.
+  setNetwork(net)      { this._net           = net; }
 
   setEnemiesRemaining(count, total) {
     const el = document.getElementById('er-count');
@@ -491,6 +497,17 @@ export class HUD {
       for (const e of this.enemyManager.enemies) {
         if (e.dead || !e.root) continue;
         const m = toMM(e.root.position.x, e.root.position.z);
+        ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // Remote player dots (multiplayer). Teammates render green; everyone
+    // else orange so the player can read the situation at a glance.
+    if (this._net) {
+      for (const [, rp] of this._net.remotePlayers) {
+        if (rp.dead) continue;
+        const m = toMM(rp.root.position.x, rp.root.position.z);
+        ctx.fillStyle = rp.isTeammate ? '#4ade80' : '#ff8800';
         ctx.beginPath(); ctx.arc(m.x, m.y, 3, 0, Math.PI * 2); ctx.fill();
       }
     }

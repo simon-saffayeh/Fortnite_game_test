@@ -2,66 +2,83 @@ import * as THREE from 'three';
 
 // ── Weapon definitions ───────────────────────────────────────────────────────
 // Each weapon is locked to exactly one rarity tier.
+// ── Ammo types ──────────────────────────────────────────────────────────────
+// Reserve ammo is pooled per-type, shared across every weapon that uses it.
+// 'special' (phaseRifle) keeps its own per-instance reserve and is not
+// droppable — see Inventory.dropSlot.
+export const AMMO_TYPES = ['light', 'medium', 'heavy', 'rockets', 'shells', 'special'];
+
+// Default amount included in a world-spawn ammo pile, keyed by ammoType.
+// Each weapon spawn drops a matching pile of this size next to it, so these
+// values control how generous each fresh pickup feels.
+export const AMMO_PILE_AMOUNT = {
+  light:   90,
+  medium:  60,
+  heavy:   18,
+  rockets:  6,
+  shells:  24,
+};
+
 export const WEAPON_DEFS = {
   pistol: {
     id: 'pistol', name: 'Pistol',
     damage: 25, fireRate: 0.45, bulletSpeed: 260, range: 180,
-    spread: 0.024, magSize: 12, reloadTime: 1.3,
+    spread: 0.024, magSize: 12, reloadTime: 1.3, ammoType: 'light',
     rarityColor: 0x888888, rarity: 'Common', auto: false, pellets: 1,
   },
   smg: {
     id: 'smg', name: 'SMG',
     damage: 16, fireRate: 0.07, bulletSpeed: 350, range: 130,
-    spread: 0.058, magSize: 30, reloadTime: 1.6,
+    spread: 0.058, magSize: 30, reloadTime: 1.6, ammoType: 'light',
     rarityColor: 0x00cc44, rarity: 'Uncommon', auto: true, pellets: 1,
   },
   ar: {
     id: 'ar', name: 'Assault Rifle',
-    damage: 30, fireRate: 0.11, bulletSpeed: 420, range: 300,
-    spread: 0.026, magSize: 30, reloadTime: 2.0,
+    damage: 30, fireRate: 0.15, bulletSpeed: 420, range: 300,
+    spread: 0.026, magSize: 30, reloadTime: 2.0, ammoType: 'medium',
     rarityColor: 0x0088ff, rarity: 'Rare', auto: true, pellets: 1,
   },
   shotgun: {
     id: 'shotgun', name: 'Shotgun',
     damage: 24, fireRate: 0.85, bulletSpeed: 150, range: 55,
-    spread: 0.13, magSize: 8, reloadTime: 2.5,
+    spread: 0.13, magSize: 8, reloadTime: 2.5, ammoType: 'shells',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 7,
   },
   sniper: {
     id: 'sniper', name: 'Sniper Rifle',
     damage: 150, fireRate: 1.6, bulletSpeed: 600, range: 950,
-    spread: 0.003, magSize: 5, reloadTime: 3.2,
+    spread: 0.003, magSize: 5, reloadTime: 3.2, ammoType: 'heavy',
     rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
   },
   minigun: {
     id: 'minigun', name: 'Minigun',
     damage: 20, fireRate: 0.055, bulletSpeed: 390, range: 260,
-    spread: 0.058, magSize: 100, reloadTime: 5.0,
+    spread: 0.038, magSize: 100, reloadTime: 5.0, ammoType: 'light',
     rarityColor: 0xff1111, rarity: 'Mythic', auto: true, pellets: 1,
   },
   heavyAR: {
     id: 'heavyAR', name: 'Heavy AR',
-    damage: 42, fireRate: 0.18, bulletSpeed: 400, range: 320,
-    spread: 0.018, magSize: 20, reloadTime: 2.4,
+    damage: 42, fireRate: 0.21, bulletSpeed: 400, range: 320,
+    spread: 0.018, magSize: 20, reloadTime: 2.4, ammoType: 'medium',
     rarityColor: 0x0088ff, rarity: 'Rare', auto: true, pellets: 1,
   },
   dualPistols: {
     id: 'dualPistols', name: 'Dual Pistols',
     damage: 30, fireRate: 0.22, bulletSpeed: 270, range: 160,
-    spread: 0.030, magSize: 18, reloadTime: 1.5,
+    spread: 0.030, magSize: 18, reloadTime: 1.5, ammoType: 'light',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 2,
   },
   rocketLauncher: {
     id: 'rocketLauncher', name: 'Rocket Launcher',
     damage: 120, fireRate: 1.8, bulletSpeed: 80, range: 400,
-    spread: 0.005, magSize: 4, reloadTime: 3.5,
+    spread: 0.005, magSize: 4, reloadTime: 3.5, ammoType: 'rockets',
     rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
     explosive: true, explosionRadius: 8, explosionDamage: 120,
   },
   bombLauncher: {
     id: 'bombLauncher', name: 'Nuke Launcher',
     damage: 30, fireRate: 5.0, bulletSpeed: 38, range: 480,
-    spread: 0.002, magSize: 2, reloadTime: 6.0,
+    spread: 0.002, magSize: 2, reloadTime: 6.0, ammoType: 'rockets',
     rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 1,
     explosive: true, explosionRadius: 45, explosionDamage: 280,
     gravity: -10,
@@ -70,31 +87,32 @@ export const WEAPON_DEFS = {
   handCannon: {
     id: 'handCannon', name: 'Hand Cannon',
     damage: 68, fireRate: 0.70, bulletSpeed: 320, range: 230,
-    spread: 0.010, magSize: 7, reloadTime: 1.9,
+    spread: 0.010, magSize: 7, reloadTime: 1.9, ammoType: 'heavy',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
   crossbow: {
     id: 'crossbow', name: 'Crossbow',
     damage: 98, fireRate: 1.1, bulletSpeed: 210, range: 290,
-    spread: 0.004, magSize: 1, reloadTime: 1.4,
+    spread: 0.004, magSize: 1, reloadTime: 1.4, ammoType: 'heavy',
     rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
     silent: true,
   },
   huntingRifle: {
     id: 'huntingRifle', name: 'Hunting Rifle',
     damage: 108, fireRate: 1.05, bulletSpeed: 490, range: 430,
-    spread: 0.007, magSize: 1, reloadTime: 1.9,
+    spread: 0.007, magSize: 1, reloadTime: 1.9, ammoType: 'medium',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
   // ── Unique weapons ───────────────────────────────────────────────────────────
   // Phase Rifle: bullet travels slowly — when it hits anything the player
   // instantly teleports to that location. Fire into a window, teleport inside.
+  // 'special' ammo type means it owns its own reserve and is NOT droppable.
   phaseRifle: {
     id: 'phaseRifle', name: 'Phase Rifle',
     damage: 45, fireRate: 1.6, bulletSpeed: 85, range: 460,
-    spread: 0.002, magSize: 4, reloadTime: 2.8,
+    spread: 0.002, magSize: 4, reloadTime: 2.8, ammoType: 'special',
     rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 1,
-    teleport: true,
+    teleport: true, undroppable: true,
   },
 };
 
@@ -284,13 +302,44 @@ function _buildGunModelRaw(def, scale = 1) {
 
 // ── Weapon instance (runtime ammo state) ─────────────────────────────────────
 export class WeaponInstance {
-  constructor(def) {
-    this.def        = def;
-    this.ammo       = def.magSize;
-    this.reserve    = def.maxReserve !== undefined ? def.maxReserve : def.magSize * 4;
-    this.reloading  = false;
-    this._reloadT   = 0;
+  /**
+   * @param {Object} def    weapon definition from WEAPON_DEFS
+   * @param {Object} [init] optional starting state. Used when picking up a
+   *                        previously-dropped weapon: { ammo, reserve }.
+   *                        `ammo` defaults to a fresh full mag.
+   *                        `reserve` is only meaningful for 'special' ammoType
+   *                        (phaseRifle) — every other weapon reads its reserve
+   *                        from the inventory's shared pool.
+   */
+  constructor(def, init = {}) {
+    this.def          = def;
+    this.ammo         = init.ammo != null ? init.ammo : def.magSize;
+    // Special-type reserve (phaseRifle). Ignored for all other ammoTypes —
+    // shared pool on Inventory is the source of truth for them.
+    if (def.ammoType === 'special') {
+      this.reserve = init.reserve != null ? init.reserve : def.magSize * 4;
+    } else {
+      this.reserve = 0;
+    }
+    this.reloading    = false;
+    this._reloadT     = 0;
     this.fireCooldown = 0;
+
+    // Set by Inventory.addWeapon when this instance joins a slot. Cleared
+    // on drop. While null, reload from shared pool is a no-op (the weapon
+    // can still fire what's in the mag).
+    this._inventory   = null;
+  }
+
+  /** Reserve readable for HUD / inventory panel. */
+  get displayReserve() {
+    if (this.def.ammoType === 'special') return this.reserve;
+    return this._inventory?.ammoPool[this.def.ammoType] ?? 0;
+  }
+
+  /** How much reserve is actually available right now (for reload checks). */
+  _availableReserve() {
+    return this.displayReserve;
   }
 
   update(dt) {
@@ -312,29 +361,52 @@ export class WeaponInstance {
   }
 
   startReload() {
-    if (this.reloading || this.ammo === this.def.magSize || this.reserve === 0) return;
+    if (this.reloading || this.ammo === this.def.magSize) return;
+    if (this._availableReserve() === 0) return;
     this.reloading = true;
     this._reloadT  = this.def.reloadTime;
   }
 
   _finishReload() {
     const need = this.def.magSize - this.ammo;
-    const take = Math.min(need, this.reserve);
-    this.ammo    += take;
-    this.reserve -= take;
+    let take;
+    if (this.def.ammoType === 'special') {
+      take = Math.min(need, this.reserve);
+      this.reserve -= take;
+    } else if (this._inventory) {
+      take = this._inventory.consumeAmmo(this.def.ammoType, need);
+    } else {
+      take = 0;
+    }
+    this.ammo += take;
     this.reloading = false;
   }
 }
 
 // ── World pickup ─────────────────────────────────────────────────────────────
 export class WeaponPickup {
-  constructor(scene, def, position) {
+  /**
+   * @param {THREE.Scene} scene
+   * @param {Object}      def         from WEAPON_DEFS
+   * @param {THREE.Vector3} position  world-space spawn point
+   * @param {Object}      [ammoState] { ammo, reserve } — pass when spawning
+   *                                  a pickup from a player-dropped weapon
+   *                                  to preserve its in-mag and reserve
+   *                                  ammo. Omit for fresh world pickups.
+   */
+  constructor(scene, def, position, ammoState = null) {
     this.scene     = scene;
     this.def       = def;
     this.collected = false;
     this.nearPlayer = false;
     this._t        = Math.random() * Math.PI * 2;
     this._baseY    = position.y + 0.9;
+
+    // Ammo state — defaults match a fresh weapon. Stored on the pickup so
+    // it round-trips through drop → world → re-pickup.
+    const defaultReserve = def.maxReserve !== undefined ? def.maxReserve : def.magSize * 4;
+    this.ammo    = ammoState?.ammo    ?? def.magSize;
+    this.reserve = ammoState?.reserve ?? defaultReserve;
 
     this.root = new THREE.Group();
     this.root.position.set(position.x, this._baseY, position.z);
@@ -405,14 +477,35 @@ export const RARITY_POOL = [
   { id: 'bombLauncher',   weight:  0.3},
 ];
 
-export function randomWeaponDef() {
+/**
+ * Roll a weapon def from the rarity pool. Accepts an optional RNG so callers
+ * (e.g. multiplayer world setup) can pass a seeded function to keep every
+ * client's loot identical.
+ */
+export function randomWeaponDef(rng = Math.random) {
   const total = RARITY_POOL.reduce((s, e) => s + e.weight, 0);
-  let r = Math.random() * total;
+  let r = rng() * total;
   for (const entry of RARITY_POOL) {
     r -= entry.weight;
     if (r <= 0) return WEAPON_DEFS[entry.id];
   }
   return WEAPON_DEFS.pistol;
+}
+
+/**
+ * Mulberry32 PRNG. Deterministic from a 32-bit integer seed. Used by
+ * WeaponSystem when a multiplayer match seeds world loot so every client
+ * places the same weapon types at the same SPAWN_POINTS.
+ */
+export function mulberry32(seed) {
+  let s = seed | 0;
+  return function() {
+    s = (s + 0x6D2B79F5) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // ── WeaponSystem (spawns and manages all pickups) ────────────────────────────
@@ -447,10 +540,11 @@ const SPAWN_POINTS = [
   { x: 114,  z: -14  },  // guest cabin
   { x:  86,  z:  4   },  // shed
 
-  // Fort Ironwatch (center -130, 50)
-  { x: -130, z:  63  },  // barracks
-  { x: -130, z:  32  },  // armory
-  { x: -130, z:  50  },  // keep interior
+  // Frank's Jail (center -128, 50)
+  { x: -128, z:  50  },  // corridor
+  { x: -136, z:  50  },  // west middle cell
+  { x: -120, z:  41  },  // east south cell
+  { x: -107, z:  50  },  // exercise yard
 
   // Ancient Temple (center 35, -160)
   { x:  35,  z: -160 },
@@ -502,11 +596,23 @@ const SPAWN_POINTS = [
 ];
 
 export class WeaponSystem {
-  constructor(scene, world) {
+  /**
+   * @param {THREE.Scene} scene
+   * @param {import('./world.js').World} world
+   * @param {import('./ammo.js').AmmoSystem|null} [ammo] optional — if
+   *   provided, each spawned weapon also drops a matching ammo pile next
+   *   to itself. World pickup behaviour is unchanged when ammo is null.
+   * @param {number|null} [seed] optional 32-bit seed. When set, the weapon
+   *   type at each spawn point is determined deterministically so every
+   *   multiplayer client agrees on the loot layout. Null = Math.random.
+   */
+  constructor(scene, world, ammo = null, seed = null) {
     this.scene   = scene;
     this.world   = world;
+    this.ammo    = ammo;
     this.pickups = [];
     this._nearbyPickup = null;
+    this._rng = seed != null ? mulberry32(seed) : Math.random;
     this._spawnAll();
   }
 
@@ -514,9 +620,18 @@ export class WeaponSystem {
     for (const s of SPAWN_POINTS) {
       const h = this.world.getTerrainHeight(s.x, s.z);
       if (h < 0.2) continue;
-      const def = randomWeaponDef();
+      const def = randomWeaponDef(this._rng);
       const y = h + (s.dy ?? 0);
       this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, y, s.z)));
+      // Ammo pile sits ~1.2m to the side of the gun. 'special' weapons
+      // (phaseRifle) don't get a world pile — their ammo isn't shared.
+      if (this.ammo && def.ammoType && def.ammoType !== 'special') {
+        const offset = (this._rng() - 0.5) * 0.6;
+        this.ammo.spawnPile(
+          def.ammoType,
+          new THREE.Vector3(s.x + 1.2 + offset, y, s.z + offset),
+        );
+      }
     }
   }
 

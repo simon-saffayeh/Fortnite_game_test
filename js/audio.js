@@ -28,7 +28,7 @@ const SOUND_FILES = {
 // Tweak these to balance loudness across all weapons/effects.
 const VOLUME_WEIGHTS = {
   pistol:         1.0,
-  shotgun:        1.0,
+  shotgun:        3.0,
   handCannon:     1.0,
   sniper:         1.0,
   rocketLauncher: 1.0,

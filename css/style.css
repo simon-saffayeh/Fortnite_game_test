@@ -237,6 +237,88 @@ body {
 #victory-screen button       { background: #f59e0b; color: #000; }
 #victory-screen button:hover { background: #d97706; box-shadow: 0 0 20px rgba(245,158,11,0.5); }
 
+/* Two side-by-side buttons on the death screen (Spectate / Return to Lobby). */
+.end-buttons { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+#death-screen #btn-spectate       { background: #475569; color: #fff; }
+#death-screen #btn-spectate:hover { background: #334155; box-shadow: 0 0 20px rgba(71,85,105,0.5); }
+
+/* Match-over screen — shown after the spectator runs out of targets. */
+#match-over-screen {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,10,0.85);
+  animation: endFade 0.8s ease;
+}
+#match-over-screen .end-icon { color: #94a3b8; }
+#match-over-screen h1        { color: #cbd5e1; text-shadow: 0 0 40px rgba(148,163,184,0.5); }
+#match-over-screen button       { background: #475569; color: #fff; }
+#match-over-screen button:hover { background: #334155; box-shadow: 0 0 20px rgba(71,85,105,0.5); }
+
+/* ── Spectator HUD ─────────────────────────────────────────────────────── */
+#spectator-hud {
+  position: fixed; left: 50%; bottom: 36px; transform: translateX(-50%);
+  pointer-events: none; z-index: 80;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  font-family: "Segoe UI", Arial, sans-serif; color: #f1f5f9;
+  text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+#spectator-hud .spec-banner {
+  display: flex; align-items: center; gap: 14px;
+  padding: 10px 22px;
+  background: rgba(15,23,42,0.78);
+  border: 1px solid rgba(148,163,184,0.4);
+  border-radius: 10px;
+  font-size: 18px; letter-spacing: 2px;
+}
+#spectator-hud .spec-label { color: #94a3b8; font-weight: 700; font-size: 13px; }
+#spectator-hud .spec-name  { color: #fbbf24; font-weight: 800; }
+#spectator-hud .spec-name.empty { color: #ef4444; font-style: italic; letter-spacing: 0; }
+#spectator-hud .spec-loadout {
+  color: #cbd5e1; font-weight: 600; font-size: 14px;
+  border-left: 1px solid rgba(148,163,184,0.4); padding-left: 14px; margin-left: 6px;
+}
+#spectator-hud .spec-controls {
+  display: flex; gap: 18px; font-size: 12px; color: rgba(241,245,249,0.75);
+}
+#spectator-hud kbd {
+  display: inline-block; padding: 1px 6px; margin: 0 2px;
+  background: rgba(30,41,59,0.9); border: 1px solid rgba(148,163,184,0.5);
+  border-radius: 4px; font-family: ui-monospace, monospace; font-size: 11px;
+}
+
+/* ── Supply Drop HUD (Hold E to open) ──────────────────────────────────── */
+#supply-hud {
+  position: fixed; left: 50%; bottom: 130px; transform: translateX(-50%);
+  pointer-events: none; z-index: 70;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #f1f5f9; text-shadow: 0 2px 8px rgba(0,0,0,0.8);
+}
+#supply-hud .sd-label {
+  padding: 8px 18px;
+  background: rgba(15,23,42,0.78);
+  border: 1px solid rgba(255,170,0,0.6);
+  border-radius: 8px;
+  font-size: 14px; letter-spacing: 1.5px; font-weight: 700;
+}
+#supply-hud .sd-label kbd {
+  display: inline-block; padding: 1px 6px; margin: 0 2px;
+  background: rgba(30,41,59,0.9); border: 1px solid rgba(255,170,0,0.5);
+  border-radius: 4px; font-family: ui-monospace, monospace; font-size: 12px;
+  color: #ffd166;
+}
+#supply-hud .sd-bar {
+  width: 220px; height: 8px;
+  background: rgba(15,23,42,0.7);
+  border: 1px solid rgba(255,170,0,0.5);
+  border-radius: 4px; overflow: hidden;
+}
+#supply-hud .sd-bar-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #ffaa00, #ffd166);
+  transition: width 60ms linear;
+}
+
 /* ── Directional damage indicators ─────────────────────────────────────── */
 .dir-dmg { position: absolute; pointer-events: none; }
 .dir-top    { top: 0; left: 0; right: 0; height: 160px;
@@ -513,6 +595,68 @@ body {
   text-align: center; margin-bottom: 24px; letter-spacing: 0.5px; min-height: 18px;
 }
 
+/* ── Mode picker (host taps Solo / Duo before starting) ────────────────── */
+.lobby-mode-row {
+  display: flex; gap: 10px; justify-content: center; align-items: center;
+  margin: 8px 0 16px; font-size: 14px; color: #f1f5f9;
+}
+.lobby-mode-row .mode-label { color: #94a3b8; letter-spacing: 1.5px; font-weight: 700; }
+.lobby-mode-row .mode-btn {
+  border: 2px solid rgba(148,163,184,0.3);
+  background: rgba(15,23,42,0.6);
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 8px 22px;
+  font-size: 13px; font-weight: 800; letter-spacing: 2px;
+  cursor: pointer; transition: all 0.15s;
+}
+.lobby-mode-row .mode-btn:hover { background: rgba(30,41,59,0.8); color: #fff; }
+.lobby-mode-row .mode-btn.active {
+  background: #f59e0b; color: #000; border-color: #f59e0b;
+  box-shadow: 0 0 14px rgba(245,158,11,0.45);
+}
+.lobby-mode-row.readonly .mode-btn { opacity: 0.55; pointer-events: none; }
+
+/* In-game players shown in lobby (late-joiner view) — dimmed row + IN GAME tag. */
+.lobby-player.in-game .lp-name { color: #fbbf24; }
+.lobby-player.in-game .lp-ready { color: #fbbf24 !important; }
+.lobby-player.in-game { opacity: 0.85; }
+
+#btn-spectate {
+  background: linear-gradient(135deg, #475569, #334155);
+  color: #fff; border: none;
+}
+#btn-spectate:hover { box-shadow: 0 0 20px rgba(71,85,105,0.5); }
+
+/* ── Team picker (Duo only) ────────────────────────────────────────────── */
+.lobby-teams {
+  display: flex; flex-wrap: wrap; gap: 10px;
+  justify-content: center; margin-bottom: 14px;
+}
+.lobby-team {
+  background: rgba(15,23,42,0.55);
+  border: 1px solid rgba(148,163,184,0.3);
+  border-radius: 8px;
+  padding: 8px 10px;
+  min-width: 130px;
+}
+.lobby-team .team-title {
+  display: block;
+  font-size: 11px; font-weight: 800; letter-spacing: 2px;
+  color: #fbbf24; margin-bottom: 6px; text-align: center;
+}
+.lobby-team .team-slot {
+  display: block;
+  font-size: 13px; padding: 5px 8px; margin: 3px 0;
+  background: rgba(30,41,59,0.6);
+  border: 1px dashed rgba(148,163,184,0.25);
+  border-radius: 6px; color: #f1f5f9;
+  cursor: pointer; user-select: none;
+}
+.lobby-team .team-slot.empty { color: rgba(241,245,249,0.35); font-style: italic; }
+.lobby-team .team-slot:hover:not(.empty) { background: rgba(71,85,105,0.7); }
+.lobby-team.target-selected { border-color: #fbbf24; box-shadow: 0 0 12px rgba(251,191,36,0.4); }
+
 .lobby-buttons {
   display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
 }
@@ -563,6 +707,11 @@ body {
   pointer-events: none; user-select: none;
   white-space: nowrap; z-index: 20;
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+/* Teammate (duo mode): name in friendly green to distinguish at a glance. */
+.remote-player-tag.teammate {
+  color: #4ade80;
+  border-color: rgba(74,222,128,0.5);
 }
 
 /* ── Zombie HUD ───────────────────────────────────────────────────────────── */

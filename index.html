@@ -60,10 +60,23 @@
         <span id="lobby-share-url"></span>
       </div>
       <div id="lobby-players"></div>
+
+      <!-- Mode picker: host taps Solo (FFA) or Duo (teams of 2). -->
+      <div id="lobby-mode-row" class="lobby-mode-row hidden">
+        <span class="mode-label">Mode:</span>
+        <button class="mode-btn active" data-mode="solo">Solo</button>
+        <button class="mode-btn"        data-mode="duo">Duo</button>
+      </div>
+
+      <!-- Team picker: visible only when Duo is selected. Shows team buckets
+           with player chips that the host can re-assign. -->
+      <div id="lobby-teams" class="lobby-teams hidden"></div>
+
       <p id="lobby-status"></p>
       <div class="lobby-buttons">
         <button id="btn-ready">READY UP</button>
         <button id="btn-start-game" class="hidden">START GAME</button>
+        <button id="btn-spectate" class="hidden">SPECTATE MATCH</button>
         <button id="btn-lobby-back">← BACK</button>
       </div>
     </div>

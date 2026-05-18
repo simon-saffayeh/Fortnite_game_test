@@ -214,6 +214,14 @@ export class DeployController {
   // ── Public ──────────────────────────────────────────────────────────────
   getPhaseInt() { return this.phase; }
 
+  /**
+   * Bus flight endpoints in world space, used by the map overlay to draw the
+   * incoming route line. Returns null components if the controller is no
+   * longer active so callers can skip rendering after landing.
+   */
+  getBusStart() { return this._busStart; }
+  getBusEnd()   { return this._busEnd; }
+
   update(dt) {
     if (!this.active) return;
     this._readMouse();

@@ -15,7 +15,58 @@ export class Inventory {
     this._healSlotIdx  = -1;
     this.onHealProgress = null; // (progress: 0-1 | -1 for cancel, label: string) => void
 
+    // Fires when a weapon is dropped (G key OR inventory panel button).
+    // Receives the WeaponInstance so the host can spawn a world pickup with
+    // preserved ammo/reserve state. Consumables aren't routed through this —
+    // they're just discarded.
+    this.onDrop = null;       // (inst: WeaponInstance) => void
+
+    // ── Shared ammo pool ─────────────────────────────────────────────────
+    // Reserve ammo is pooled by ammo type and shared across every weapon of
+    // that type currently in the player's slots. Picking up an ammo pile
+    // adds to the corresponding bucket. Reloading drains from it.
+    // 'special' is not stored here — that's per-instance (phaseRifle).
+    this.ammoPool = {
+      light:   0,
+      medium:  0,
+      heavy:   0,
+      rockets: 0,
+      shells:  0,
+    };
+
+    // Fires when the shared ammo pool changes (pickup, reload, drop). The
+    // HUD subscribes to refresh its readouts immediately rather than waiting
+    // for the next tick's polling.
+    this.onAmmoChanged = null; // (type: string, newAmount: number) => void
+
     this._bindKeys();
+  }
+
+  // ── Shared ammo API ────────────────────────────────────────────────────
+
+  /** Returns the current pool amount for an ammo type, or 0 for unknown. */
+  getReserve(type) {
+    return this.ammoPool[type] ?? 0;
+  }
+
+  /**
+   * Consume up to `amount` from the pool of the given type. Returns the
+   * amount actually taken (0 if the pool was empty).
+   */
+  consumeAmmo(type, amount) {
+    const have = this.ammoPool[type] ?? 0;
+    if (have === 0 || amount <= 0) return 0;
+    const take = Math.min(have, amount);
+    this.ammoPool[type] = have - take;
+    if (this.onAmmoChanged) this.onAmmoChanged(type, this.ammoPool[type]);
+    return take;
+  }
+
+  /** Add ammo to a pool. Unknown types are silently ignored. */
+  addAmmo(type, amount) {
+    if (!(type in this.ammoPool) || amount <= 0) return;
+    this.ammoPool[type] += amount;
+    if (this.onAmmoChanged) this.onAmmoChanged(type, this.ammoPool[type]);
   }
 
   _bindKeys() {
@@ -47,20 +98,32 @@ export class Inventory {
 
   getActive() { return this.slots[this.activeSlot] ?? null; }
 
-  /** Add a WeaponInstance. Returns true if successful. */
+  /**
+   * Add a WeaponInstance. Returns true if successful.
+   *
+   * Duplicate handling: with shared ammo, picking up a copy of a gun you
+   * already have transfers the new weapon's *loaded* mag straight into the
+   * shared pool (so the pickup isn't completely wasted) and discards the
+   * gun. For special-ammo weapons (phaseRifle) the loaded mag is dropped
+   * into the existing slot's reserve instead, since 'special' has no pool.
+   */
   addWeapon(inst) {
-    // prefer same weapon type to top-up ammo
+    // Duplicate of an existing slot — fold the ammo in, discard the weapon.
     for (let i = 0; i < 5; i++) {
-      if (this.slots[i]?.def.id === inst.def.id) {
-        this.slots[i].reserve = Math.min(
-          this.slots[i].reserve + inst.reserve,
-          inst.def.magSize * 5
-        );
+      const cur = this.slots[i];
+      if (cur?.def.id === inst.def.id) {
+        if (inst.def.ammoType === 'special') {
+          cur.reserve = (cur.reserve ?? 0) + inst.ammo + (inst.reserve ?? 0);
+        } else {
+          this.addAmmo(inst.def.ammoType, inst.ammo);
+        }
         this.selectSlot(i);
         return true;
       }
     }
-    // fill empty slot
+    // Bind to this inventory so the WeaponInstance can find the shared pool.
+    inst._inventory = this;
+    // First empty slot wins.
     for (let i = 0; i < 5; i++) {
       if (!this.slots[i]) {
         this.slots[i] = inst;
@@ -68,10 +131,47 @@ export class Inventory {
         return true;
       }
     }
-    // replace active slot
-    this.slots[this.activeSlot] = inst;
-    this.selectSlot(this.activeSlot);
+    // Slots full — displace the active slot (or another if active is
+    // undroppable) and route the displaced item to onDrop so the player can
+    // pick it back up. Both weapons and consumables go through the same
+    // callback — main.js inspects `.isConsumable` to choose the pickup type.
+    const target = this._chooseDisplaceSlot();
+    if (target === -1) return false; // every slot was undroppable
+    this._displace(target);
+    this.slots[target] = inst;
+    this.selectSlot(target);
     return true;
+  }
+
+  /**
+   * Pick the slot index to displace when the inventory is full. Prefers
+   * the currently-active slot unless it holds an undroppable weapon
+   * (phaseRifle), in which case scan for any other droppable slot.
+   * Returns -1 if every slot is undroppable (effectively unreachable in
+   * normal play — there is only one undroppable weapon).
+   */
+  _chooseDisplaceSlot() {
+    const a = this.slots[this.activeSlot];
+    if (!a || a.isConsumable || !a.def?.undroppable) return this.activeSlot;
+    for (let i = 0; i < 5; i++) {
+      const s = this.slots[i];
+      if (!s) continue;
+      if (s.isConsumable || !s.def?.undroppable) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Empty `idx` and route the displaced item to `onDrop` so the host can
+   * spawn a world pickup. Weapons unbind from this inventory first so they
+   * don't keep a stale shared-pool pointer.
+   */
+  _displace(idx) {
+    const item = this.slots[idx];
+    if (!item) return;
+    this.slots[idx] = null;
+    if (!item.isConsumable) item._inventory = null;
+    if (this.onDrop) this.onDrop(item);
   }
 
   /** Add a consumable to inventory. Returns true. */
@@ -93,9 +193,13 @@ export class Inventory {
         return true;
       }
     }
-    // Replace active
-    this.slots[this.activeSlot] = { isConsumable: true, def, count: 1 };
-    this.selectSlot(this.activeSlot);
+    // Slots full — displace and drop the active slot (same rule as weapons)
+    // so the player can recover it.
+    const target = this._chooseDisplaceSlot();
+    if (target === -1) return false;
+    this._displace(target);
+    this.slots[target] = { isConsumable: true, def, count: 1 };
+    this.selectSlot(target);
     return true;
   }
 
@@ -137,8 +241,27 @@ export class Inventory {
   }
 
   dropActive() {
-    this.slots[this.activeSlot] = null;
-    this.player.setHeldWeapon(null);
+    this.dropSlot(this.activeSlot);
+  }
+
+  /**
+   * Drop the contents of a specific slot. For weapons, fires `onDrop` so the
+   * game can spawn a world pickup that preserves the weapon's ammo state.
+   * Consumables are simply discarded — they don't round-trip.
+   *
+   * Weapons flagged `undroppable: true` (phaseRifle) are refused so they
+   * can't be picked up by other players or accidentally lost.
+   */
+  dropSlot(idx) {
+    const item = this.slots[idx];
+    if (!item) return;
+    if (!item.isConsumable && item.def?.undroppable) return; // phaseRifle, etc.
+    this.slots[idx] = null;
+    if (idx === this.activeSlot) this.player.setHeldWeapon(null);
+    if (!item.isConsumable) {
+      item._inventory = null;   // unbind from the shared pool
+      if (this.onDrop) this.onDrop(item);
+    }
   }
 
   reloadActive() {

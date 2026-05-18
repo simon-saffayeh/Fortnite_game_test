@@ -222,7 +222,9 @@ export class ProjectileSystem {
       // Player bullets → hit remote players (multiplayer)
       if (b.faction === 'player' && remotePlayers) {
         for (const [targetId, rp] of remotePlayers) {
-          if (rp.dead) continue;
+          // Skip teammates (duo mode) so bullets pass straight through them
+          // without triggering hit markers, damage, or kill credit.
+          if (rp.dead || rp.isTeammate) continue;
           if (segmentSphere(b.prevPosition, b.position, rp.getCenter(), 0.95)) {
             if (particles) particles.spawnBurst(b.position.clone(), {
               count: 12, color: 0xff2200, speed: 4, lifetime: 0.3, size: 0.15,
