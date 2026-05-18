@@ -851,3 +851,30 @@ body {
   font-size: 11px; color: rgba(255,255,255,0.28);
   text-align: center; letter-spacing: 0.5px;
 }
+
+/* ── Solo difficulty picker (home screen) ──────────────────────────────── */
+.difficulty-row {
+  margin: 18px 0 4px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+}
+.difficulty-label {
+  color: #94a3b8; font-size: 11px; letter-spacing: 2px; font-weight: 700;
+}
+.difficulty-buttons {
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+}
+.diff-btn {
+  border: 2px solid rgba(148,163,184,0.3);
+  background: rgba(15,23,42,0.6);
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 7px 16px;
+  font-size: 12px; font-weight: 800; letter-spacing: 2px;
+  cursor: pointer; transition: all 0.15s;
+  font-family: inherit;
+}
+.diff-btn:hover { background: rgba(30,41,59,0.85); color: #fff; }
+.diff-btn[data-diff="easy"].active   { background: #22c55e; color: #000; border-color: #22c55e; box-shadow: 0 0 14px rgba(34,197,94,0.45); }
+.diff-btn[data-diff="medium"].active { background: #f59e0b; color: #000; border-color: #f59e0b; box-shadow: 0 0 14px rgba(245,158,11,0.45); }
+.diff-btn[data-diff="hard"].active   { background: #ef4444; color: #000; border-color: #ef4444; box-shadow: 0 0 14px rgba(239,68,68,0.45); }
+.diff-btn[data-diff="expert"].active { background: #a855f7; color: #fff; border-color: #a855f7; box-shadow: 0 0 14px rgba(168,85,247,0.55); }

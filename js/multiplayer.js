@@ -41,6 +41,14 @@ export class RemotePlayer {
     this._targetPos = new THREE.Vector3();
     this._targetYaw = 0;
 
+    // Animation state — driven by frame-to-frame position deltas
+    this._prevPos    = new THREE.Vector3();
+    this._animPhase  = 0;   // sine-wave phase for leg/arm swing
+    this._animSpeed  = 0;   // smoothed horizontal speed estimate
+    this._bobY       = 0;   // smoothed torso bob
+    this._crouchBlend = 0;  // 0 = standing, 1 = fully crouched
+    this.crouching   = false;
+
     this._buildModel();
     this._buildParachute();
     this._buildNameTag();
@@ -58,31 +66,50 @@ export class RemotePlayer {
       return m;
     };
 
-    // Body — red scheme to distinguish from the blue local player
-    this.root.add(box(0.70, 0.90, 0.45, 0x8b0000, 0, 1.35, 0));  // torso
-    this.root.add(box(0.72, 0.15, 0.47, 0x5a1a00, 0, 0.97, 0));  // belt
-    this.root.add(box(0.65, 0.25, 0.42, 0x37474f, 0, 0.87, 0));  // hips
+    // Torso group — bobs vertically and leans during sprint
+    this._torso = new THREE.Group();
+    this.root.add(this._torso);
+    this._torso.add(box(0.70, 0.90, 0.45, 0x8b0000, 0, 1.35, 0));  // torso
+    this._torso.add(box(0.72, 0.15, 0.47, 0x5a1a00, 0, 0.97, 0));  // belt
+    this._torso.add(box(0.65, 0.25, 0.42, 0x37474f, 0, 0.87, 0));  // hips
 
-    // Head
-    this.root.add(box(0.60, 0.58, 0.56, 0xffcba4, 0, 1.90, 0));
+    // Head group — child of torso so it follows lean + bob
+    this._head = new THREE.Group();
+    this._head.position.set(0, 1.90, 0);
+    this._torso.add(this._head);
+    this._head.add(box(0.60, 0.58, 0.56, 0xffcba4, 0, 0, 0));
     const helmGeo = new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6);
     const helm    = new THREE.Mesh(helmGeo, lm(0x6a0000));
-    helm.position.set(0, 1.95, 0);
-    this.root.add(helm);
+    helm.position.set(0, 0.05, 0);
+    this._head.add(helm);
 
-    // Arms
-    this.root.add(box(0.22, 0.90, 0.22, 0x7a0000, -0.48, 1.20, 0));
-    this.root.add(box(0.22, 0.90, 0.22, 0x7a0000,  0.48, 1.20, 0));
-    // Gloves
-    this.root.add(box(0.22, 0.20, 0.22, 0x1a237e, -0.48, 0.72, 0));
-    this.root.add(box(0.22, 0.20, 0.22, 0x1a237e,  0.48, 0.72, 0));
+    // Arm groups — pivot at the shoulder so they swing during walk/run
+    const buildArm = (sx) => {
+      const g = new THREE.Group();
+      g.position.set(sx, 1.65, 0);
+      // Upper arm hangs from the pivot, glove hangs from the bottom of the arm
+      g.add(box(0.22, 0.90, 0.22, 0x7a0000, 0, -0.45, 0));
+      g.add(box(0.22, 0.20, 0.22, 0x1a237e, 0, -0.93, 0));
+      return g;
+    };
+    this._leftArm  = buildArm(-0.48);
+    this._rightArm = buildArm( 0.48);
+    this._torso.add(this._leftArm);
+    this._torso.add(this._rightArm);
 
-    // Legs
-    this.root.add(box(0.26, 1.0, 0.26, 0x37474f, -0.20, 0.50, 0));
-    this.root.add(box(0.26, 1.0, 0.26, 0x37474f,  0.20, 0.50, 0));
-    // Boots
-    this.root.add(box(0.26, 0.22, 0.34, 0x212121, -0.20, -0.01, 0.04));
-    this.root.add(box(0.26, 0.22, 0.34, 0x212121,  0.20, -0.01, 0.04));
+    // Leg groups — pivot at the hip
+    const buildLeg = (sx) => {
+      const g = new THREE.Group();
+      g.position.set(sx, 1.00, 0);
+      // Thigh + boot hang down from the pivot
+      g.add(box(0.26, 1.00, 0.26, 0x37474f, 0, -0.50, 0));
+      g.add(box(0.26, 0.22, 0.34, 0x212121, 0, -1.01, 0.04));
+      return g;
+    };
+    this._leftLeg  = buildLeg(-0.20);
+    this._rightLeg = buildLeg( 0.20);
+    this.root.add(this._leftLeg);
+    this.root.add(this._rightLeg);
 
     // ── Health bar ──────────────────────────────────────────────────────
     const hpBg = new THREE.Mesh(
@@ -131,7 +158,7 @@ export class RemotePlayer {
     if (hud) hud.appendChild(this._tag);
   }
 
-  setTargetState(pos, yaw, phase, weapon, ammo, reserve, health) {
+  setTargetState(pos, yaw, phase, weapon, ammo, reserve, health, crouching) {
     this._targetPos.set(pos[0], pos[1], pos[2]);
     this._targetYaw = yaw;
     if (phase !== undefined) this.phase = phase;
@@ -142,6 +169,8 @@ export class RemotePlayer {
     this.reserve  = reserve ?? null;
     // Authoritative health from victim — overrides local prediction
     if (health !== undefined && !this.dead) this.health = health;
+    // Crouch state — animation pose + lowered silhouette
+    this.crouching = !!crouching;
   }
 
   /**
@@ -176,6 +205,93 @@ export class RemotePlayer {
     return new THREE.Vector3(p.x, p.y + 1.2, p.z);
   }
 
+  // ── Limb animation — driven by horizontal speed estimated from the
+  // delta between the previous and current root positions. Walking and
+  // sprinting drive a sine-based swing; idle eases everything back to
+  // neutral. Mid-air (skydive/chute) and dead get pose overrides.
+  _animate(dt) {
+    if (!this._leftLeg) return;
+
+    if (this.dead) {
+      // Limbs go limp — soft easing back to neutral while the body topples.
+      const ease = 1 - Math.exp(-6 * dt);
+      this._leftLeg.rotation.x  *= 1 - ease;
+      this._rightLeg.rotation.x *= 1 - ease;
+      this._leftArm.rotation.x  *= 1 - ease;
+      this._rightArm.rotation.x *= 1 - ease;
+      this._torso.position.y    *= 1 - ease;
+      return;
+    }
+
+    // Horizontal speed from frame-to-frame position delta (m/s).
+    const dx = this.root.position.x - this._prevPos.x;
+    const dz = this.root.position.z - this._prevPos.z;
+    const instSpeed = Math.sqrt(dx*dx + dz*dz) / Math.max(dt, 0.001);
+    this._prevPos.copy(this.root.position);
+
+    // Smooth so a single laggy frame doesn't spike the animation.
+    this._animSpeed = THREE.MathUtils.lerp(this._animSpeed, instSpeed, 1 - Math.exp(-10 * dt));
+
+    const airborne = this.phase === 1 || this.phase === 2;
+    if (airborne) {
+      // Skydive / parachute pose — arms out, legs slightly back.
+      const target = this.phase === 1 ? 1.55 : 0.7;
+      this._leftArm.rotation.x  = THREE.MathUtils.lerp(this._leftArm.rotation.x,  -target, 0.18);
+      this._rightArm.rotation.x = THREE.MathUtils.lerp(this._rightArm.rotation.x, -target, 0.18);
+      this._leftLeg.rotation.x  = THREE.MathUtils.lerp(this._leftLeg.rotation.x,  -0.25, 0.18);
+      this._rightLeg.rotation.x = THREE.MathUtils.lerp(this._rightLeg.rotation.x, -0.25, 0.18);
+      this._torso.position.y    = THREE.MathUtils.lerp(this._torso.position.y, 0, 0.2);
+      return;
+    }
+
+    // Walking / running. Map speed → stride frequency + swing amplitude.
+    // Running threshold is roughly the local player's sprint speed.
+    const speed   = Math.min(this._animSpeed, 18);
+    const running = speed > 10;
+    const moving  = speed > 0.8;
+
+    if (moving) {
+      const freq   = running ? 9.0 : 6.0;
+      const ampLeg = THREE.MathUtils.clamp(speed / (running ? 14 : 8), 0.2, 1.0) * (running ? 0.75 : 0.55);
+      const ampArm = ampLeg * 0.7;
+      this._animPhase += dt * freq;
+
+      const sw = Math.sin(this._animPhase);
+      this._leftLeg.rotation.x  =  sw * ampLeg;
+      this._rightLeg.rotation.x = -sw * ampLeg;
+      this._leftArm.rotation.x  = -sw * ampArm;
+      this._rightArm.rotation.x =  sw * ampArm;
+
+      // Subtle torso bob — twice the leg frequency so it lands on each step.
+      const bobAmt = (running ? 0.07 : 0.04) * Math.min(speed / 10, 1);
+      this._bobY = THREE.MathUtils.lerp(this._bobY, Math.abs(Math.sin(this._animPhase)) * bobAmt - bobAmt * 0.5, 1 - Math.exp(-14 * dt));
+      this._torso.position.y = this._bobY;
+    } else {
+      // Idle — soft easing toward neutral with a faint breathing rise/fall.
+      const ease = 1 - Math.exp(-7 * dt);
+      this._leftLeg.rotation.x  *= 1 - ease;
+      this._rightLeg.rotation.x *= 1 - ease;
+      this._leftArm.rotation.x  *= 1 - ease;
+      this._rightArm.rotation.x *= 1 - ease;
+      this._animPhase += dt * 1.4;
+      this._torso.position.y = Math.sin(this._animPhase) * 0.012;
+    }
+
+    // Crouch pose — blended on top of walk/idle. Lowers torso + bends legs
+    // forward so the silhouette is visibly shorter. Eases between states.
+    this._crouchBlend = THREE.MathUtils.lerp(
+      this._crouchBlend, this.crouching ? 1 : 0, 1 - Math.exp(-12 * dt)
+    );
+    const cb = this._crouchBlend;
+    if (cb > 0.005) {
+      this._torso.position.y    -= cb * 0.45;
+      this._leftLeg.rotation.x  += cb * 0.60;
+      this._rightLeg.rotation.x += cb * 0.60;
+      this._leftArm.rotation.x  += cb * 0.25;
+      this._rightArm.rotation.x += cb * 0.25;
+    }
+  }
+
   update(dt, camera, canvas) {
     // Framerate-independent smoothing toward the latest server state.
     // 1 - exp(-k*dt) eases identically regardless of frame rate, so remote
@@ -188,6 +304,8 @@ export class RemotePlayer {
     this.root.rotation.y = THREE.MathUtils.lerp(
       this.root.rotation.y, this._targetYaw, yawA
     );
+
+    this._animate(dt);
 
     // Parachute is visible only during the chute phase
     if (this._chute) this._chute.visible = this.phase === 2 && !this.dead;
@@ -308,16 +426,23 @@ export class NetworkManager {
    * `reserve` (shared-pool reserve for the held weapon's ammoType) and
    * `health` (authoritative HP so remotes show accurate bars). All optional.
    */
-  sendState(pos, yaw, phase = 3, weapon = null, ammo = null, reserve = null, health = 100) {
+  sendState(pos, yaw, phase = 3, weapon = null, ammo = null, reserve = null, health = 100, crouching = false) {
     this.send({
       type: 'state',
       pos: [pos.x, pos.y, pos.z], yaw, phase,
-      weapon, ammo, reserve, health,
+      weapon, ammo, reserve, health, crouching,
     });
   }
   sendShoot(orig, dir, weapon) { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z], weapon }); }
   sendHit(targetId, dmg) { this.send({ type: 'hit', targetId, damage: dmg }); }
-  sendDeath()            { this.send({ type: 'death' }); }
+  /**
+   * Notify others we died. Optional `drops` array carries everything in our
+   * inventory (weapons + consumables) so other clients can spawn matching
+   * world pickups at the body. Each entry:
+   *   { kind: 'weapon',     id, ammo, reserve }
+   *   { kind: 'consumable', id, count }
+   */
+  sendDeath(drops = null) { this.send({ type: 'death', drops }); }
   sendBuild(pieceType, x, y, z, rotY) { this.send({ type: 'build', pieceType, x, y, z, rotY }); }
 
   /**
@@ -423,7 +548,7 @@ export class NetworkManager {
       case 'state':
         if (this.remotePlayers.has(msg.id)) {
           this.remotePlayers.get(msg.id).setTargetState(
-            msg.pos, msg.yaw, msg.phase, msg.weapon, msg.ammo, msg.reserve, msg.health,
+            msg.pos, msg.yaw, msg.phase, msg.weapon, msg.ammo, msg.reserve, msg.health, msg.crouching,
           );
         }
         if (this.onRemoteState) this.onRemoteState(msg);

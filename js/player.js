@@ -30,6 +30,7 @@ export class Player {
     this._mouseX    = 0;
     this._mouseY    = 0;
     this._sprinting = false;
+    this.crouching  = false;   // read by camera + main; broadcast to remotes
     this.mouseDown  = false;   // read by main.js for shooting
 
     this._bobTime  = 0;
@@ -241,11 +242,14 @@ export class Player {
 
   _handleMovement(dt) {
     const k      = this._keys;
+    // Crouch is held (Ctrl). Crouch + sprint is mutually exclusive — crouch wins.
+    this.crouching = !!(k['ControlLeft'] || k['ControlRight']) && this.grounded;
     const testingMode = (this._sprintMultiplier ?? 1.0) > 1.0;
-    const sprint = testingMode && (k['ShiftLeft'] || k['ShiftRight']) && !this.adsActive;
+    const sprint = testingMode && (k['ShiftLeft'] || k['ShiftRight']) && !this.adsActive && !this.crouching;
     const adsSlow = this.adsActive ? 0.55 : 1.0;
     const sprintMult = sprint ? this._sprintMultiplier : 1.0;
-    const speed  = (sprint ? SPRINT_SPEED : MOVE_SPEED) * adsSlow * sprintMult;
+    const crouchMult = this.crouching ? 0.5 : 1.0;
+    const speed  = (sprint ? SPRINT_SPEED : MOVE_SPEED) * adsSlow * sprintMult * crouchMult;
     const dir    = new THREE.Vector3();
     if (k['KeyW'] || k['ArrowUp'])    dir.z -= 1;
     if (k['KeyS'] || k['ArrowDown'])  dir.z += 1;

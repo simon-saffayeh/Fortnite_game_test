@@ -13,7 +13,7 @@ import { Inventory }         from './inventory.js';
 import { ProjectileSystem }  from './projectile.js';
 import { EnemyManager }      from './enemy.js';
 import { Storm }             from './storm.js';
-import { PickupManager }     from './pickups.js';
+import { PickupManager, CONSUMABLE_DEFS } from './pickups.js';
 import { ScreenShake, MuzzleFlash, DamageNumbers, DirectionalDamage, HitMarker } from './effects.js';
 import { NetworkManager, MP_SPAWNS } from './multiplayer.js';
 import { BuildingSystem } from './building.js';
@@ -85,7 +85,25 @@ class Menu {
     sensValue.textContent = parseFloat(sensSlider.value).toFixed(1);
     sensSlider.addEventListener('input', () => {
       sensValue.textContent = parseFloat(sensSlider.value).toFixed(1);
-      localStorage.setItem('bi_settings', JSON.stringify({ sensitivity: parseFloat(sensSlider.value) }));
+      const cur = JSON.parse(localStorage.getItem('bi_settings') || '{}');
+      cur.sensitivity = parseFloat(sensSlider.value);
+      localStorage.setItem('bi_settings', JSON.stringify(cur));
+    });
+
+    // Solo difficulty picker — Easy / Medium / Hard / Expert.
+    // Persisted in bi_settings; ignored by zombie + multiplayer modes.
+    this._difficulty = ['easy','medium','hard','expert'].includes(saved.difficulty)
+      ? saved.difficulty : 'medium';
+    const diffBtns = document.querySelectorAll('.diff-btn');
+    diffBtns.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.diff === this._difficulty);
+      btn.addEventListener('click', () => {
+        this._difficulty = btn.dataset.diff;
+        diffBtns.forEach(b => b.classList.toggle('active', b === btn));
+        const cur = JSON.parse(localStorage.getItem('bi_settings') || '{}');
+        cur.difficulty = this._difficulty;
+        localStorage.setItem('bi_settings', JSON.stringify(cur));
+      });
     });
 
     const nameInput = document.getElementById('player-name');
@@ -109,12 +127,13 @@ class Menu {
     const hs = document.getElementById('home-screen');
     const buildEnabled   = this._buildEnabled();
     const testingEnabled = this._testingEnabled();
+    const difficulty     = this._difficulty;
     hs.classList.add('fade-out');
     setTimeout(() => {
       hs.style.display = 'none';
       document.getElementById('loading-screen').classList.remove('hidden');
     }, 380);
-    setTimeout(() => new Game('solo', null, buildEnabled, testingEnabled, this._music), 420);
+    setTimeout(() => new Game('solo', null, buildEnabled, testingEnabled, this._music, null, difficulty), 420);
   }
 
   _startZombie() {
@@ -436,13 +455,14 @@ class Menu {
 
 // ── Game ──────────────────────────────────────────────────────────────────────
 class Game {
-  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false, lobbyMusic = null, busPath = null) {
+  constructor(mode = 'solo', net = null, buildEnabled = false, testingEnabled = false, lobbyMusic = null, busPath = null, difficulty = 'medium') {
     this.mode           = mode;
     this.net            = net;
     this.buildEnabled   = buildEnabled;
     this.testingEnabled = testingEnabled;
     this._lobbyMusic    = lobbyMusic;
     this._busPath       = busPath;
+    this.difficulty     = difficulty;
     this.deploy         = null;
     this.spectator      = null;
     this._matchOverShown = false;
@@ -618,7 +638,7 @@ class Game {
     await frame();
 
     if (this.mode === 'solo') {
-      this.enemies     = new EnemyManager(this.scene, this.world, this.projectiles);
+      this.enemies     = new EnemyManager(this.scene, this.world, this.projectiles, this.difficulty);
       this.zombieWaves = null;
     } else if (this.mode === 'zombie') {
       this.enemies     = null;
@@ -801,7 +821,12 @@ class Game {
       if (sourcePos) this.dirDmg.show(this.player.getPosition(), this.player.getYaw(), sourcePos);
     };
     this.player.onDeath = (killerLabel) => {
-      if (this.net) this.net.sendDeath();
+      // Gather inventory contents → spawn world pickups around the body
+      // → broadcast so remote clients see the same drops. We do this BEFORE
+      // sending death so the drops payload rides along the death message.
+      const drops = this._collectDeathDrops();
+      this._spawnDeathDrops(drops, this.player.getPosition());
+      if (this.net) this.net.sendDeath(drops);
       this._showDeathScreen(killerLabel);
     };
 
@@ -868,6 +893,12 @@ class Game {
           this.hud.addKill(this.net.players.get(msg.id)?.name ?? 'Player');
           this.hitMark.hit(true);
           this._lastHitTarget = null;
+        }
+        // Spawn the dead player's loot drops at their body. Their client
+        // attached the inventory contents to the death message before sending.
+        const rp = this.net.remotePlayers.get(msg.id);
+        if (rp && Array.isArray(msg.drops) && msg.drops.length) {
+          this._spawnDeathDrops(msg.drops, rp.root.position);
         }
         // Victory check uses team-aware opponent count so a Duo wins as
         // long as their team still has at least one alive player even if
@@ -1099,7 +1130,9 @@ class Game {
     const moveMult = !this.player.adsActive
       ? (this.player.airTime > 0.15 ? 2.8 : this.player._isSprinting ? 2.2 : this.player.isMovingInput ? 1.6 : 1.0)
       : 1.0;
-    const spread = weapon.def.spread * adsMultiplier * moveMult;
+    // Crouching steadies aim — tighter spread whether hip-firing or ADSing.
+    const crouchMult = this.player.crouching ? 0.65 : 1.0;
+    const spread = weapon.def.spread * adsMultiplier * moveMult * crouchMult;
 
     for (let p = 0; p < weapon.def.pellets; p++) {
       const dir = camDir.clone().add(new THREE.Vector3(
@@ -1707,6 +1740,64 @@ class Game {
     }
   }
 
+  // ── Death drops ─────────────────────────────────────────────────────────
+  // Serialize the local player's inventory into a network-safe drop array.
+  // Skips empty slots + undroppable weapons (phaseRifle). Each weapon carries
+  // its loaded mag + reserve so the pickup is exactly equivalent.
+  _collectDeathDrops() {
+    const drops = [];
+    if (!this.inventory) return drops;
+    for (const s of this.inventory.slots) {
+      if (!s) continue;
+      if (s.isConsumable) {
+        drops.push({ kind: 'consumable', id: s.def.id, count: s.count ?? 1 });
+      } else if (!s.def.undroppable) {
+        drops.push({
+          kind: 'weapon', id: s.def.id,
+          ammo: s.ammo, reserve: s.reserve ?? null,
+        });
+      }
+    }
+    return drops;
+  }
+
+  // Spawn pickups for each entry in `drops` arranged in a ring around
+  // `centerPos`. Consumables expand into one pickup per stack count so the
+  // entire stack is recoverable. Items land on the terrain so they're never
+  // half-buried regardless of where the body fell.
+  _spawnDeathDrops(drops, centerPos) {
+    if (!drops?.length) return;
+    const stamps = [];
+    for (const d of drops) {
+      if (d.kind === 'consumable') {
+        for (let i = 0; i < (d.count ?? 1); i++) stamps.push(d);
+      } else {
+        stamps.push(d);
+      }
+    }
+    const ringR = stamps.length === 1 ? 0.6 : 1.6;
+    for (let i = 0; i < stamps.length; i++) {
+      const a = (i / stamps.length) * Math.PI * 2;
+      const x = centerPos.x + Math.cos(a) * ringR;
+      const z = centerPos.z + Math.sin(a) * ringR;
+      const groundY = this.world.getTerrainHeight(x, z);
+      const baseY   = groundY >= 0 ? groundY : centerPos.y;
+      const pos = new THREE.Vector3(x, baseY + 0.15, z);
+      const d = stamps[i];
+      if (d.kind === 'weapon') {
+        const def = WEAPON_DEFS[d.id];
+        if (!def) continue;
+        this.weapons.pickups.push(new WeaponPickup(
+          this.scene, def, pos,
+          { ammo: d.ammo, reserve: d.reserve },
+        ));
+      } else {
+        const cdef = CONSUMABLE_DEFS?.[d.id];
+        if (cdef) this.pickups.spawnAt(cdef, pos);
+      }
+    }
+  }
+
   // Reusable: world position ~1.2m in front of the player at terrain height.
   _dropPositionForward() {
     const pp  = this.player.getPosition();
@@ -1780,7 +1871,7 @@ class Game {
           if (this._netTimer <= 0) {
             this._netTimer = 0.033;
             // Deploy phase: no weapon yet, send health for accurate HP bars.
-            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt(), null, null, null, this.player.health);
+            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt(), null, null, null, this.player.health, false);
           }
         }
         this.particles.update(dt);
@@ -1891,7 +1982,7 @@ class Game {
           const weaponId = (a && !a.isConsumable) ? a.def.id : null;
           const ammo     = (a && !a.isConsumable) ? a.ammo : null;
           const reserve  = (a && !a.isConsumable) ? a.displayReserve : null;
-          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3, weaponId, ammo, reserve, this.player.health);
+          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3, weaponId, ammo, reserve, this.player.health, this.player.crouching);
         }
       }
 

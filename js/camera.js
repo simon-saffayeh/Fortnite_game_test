@@ -4,7 +4,8 @@ const BASE_FOV       = 70;
 const SPRINT_FOV     = 80;
 const ADS_FOV        = 42;
 const SNIPER_ADS_FOV = 22;
-const EYE_HEIGHT     = 1.65;
+const EYE_HEIGHT        = 1.65;
+const EYE_HEIGHT_CROUCH = 1.05;
 
 export class ThirdPersonCamera {
   constructor(camera, player) {
@@ -60,8 +61,11 @@ export class ThirdPersonCamera {
     const sinY  = Math.sin(yaw),  cosY = Math.cos(yaw);
     const sinP  = Math.sin(pitch), cosP = Math.cos(pitch);
 
-    // Eye position — smooth Y to filter terrain-snap jitter on steep slopes
-    const targetEyeY = playerPos.y + EYE_HEIGHT;
+    // Eye position — smooth Y to filter terrain-snap jitter on steep slopes.
+    // Crouch lowers the eye by ~0.6m; the smoothEyeY lerp handles the easing
+    // so crouch/stand transitions don't snap.
+    const eyeH = this.player.crouching ? EYE_HEIGHT_CROUCH : EYE_HEIGHT;
+    const targetEyeY = playerPos.y + eyeH;
     if (this._smoothEyeY === null) this._smoothEyeY = targetEyeY;
     this._smoothEyeY = THREE.MathUtils.lerp(this._smoothEyeY, targetEyeY, dt * 18);
     const eyePos = new THREE.Vector3(playerPos.x, this._smoothEyeY, playerPos.z);

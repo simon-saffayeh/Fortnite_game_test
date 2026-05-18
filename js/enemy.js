@@ -13,6 +13,15 @@ const BURST_GAP      = 0.13;  // seconds between rounds within a burst
 
 const STATE = { PATROL: 0, CHASE: 1, ATTACK: 2, DEAD: 3 };
 
+// Difficulty profiles applied at enemy spawn. Multipliers stack on the base
+// constants above (MOVE_SPEED, SHOOT_INTERVAL, _shoot damage = 14).
+export const DIFFICULTY = {
+  easy:   { hp:  60, dmg: 0.6, spd: 0.85, fireRate: 0.7, count: 1.0 },
+  medium: { hp: 100, dmg: 1.0, spd: 1.0,  fireRate: 1.0, count: 1.0 },
+  hard:   { hp: 150, dmg: 1.4, spd: 1.15, fireRate: 1.4, count: 1.4 },
+  expert: { hp: 220, dmg: 1.9, spd: 1.30, fireRate: 1.8, count: 1.8 },
+};
+
 // ── Enemy ────────────────────────────────────────────────────────────────────
 export class Enemy {
   constructor(scene, world, position) {
@@ -36,6 +45,9 @@ export class Enemy {
     this._burstT    = 0;                  // gap timer between burst rounds
     this._dmgMult   = 1;                  // wave/difficulty scaling hooks
     this._spdMult   = 1;
+    this._shootInterval = SHOOT_INTERVAL; // per-enemy override for difficulty
+    this._alertedT  = 0;                  // seconds left of "I know you're out there"
+    this.manager    = null;               // set by EnemyManager for pack alerts
 
     this._buildModel(position);
     this._buildHealthBar();
@@ -200,12 +212,17 @@ export class Enemy {
     const dz = pp.z - this.root.position.z;
     const dist2D = Math.sqrt(dx * dx + dz * dz);
 
+    // Alert timer — "I just got shot from out of range, hunt the bastard
+    // down" — overrides PATROL gating and prevents LOSE_RANGE from giving up.
+    if (this._alertedT > 0) this._alertedT -= dt;
+    const alerted = this._alertedT > 0;
+
     // State transitions
     if (this.state !== STATE.DEAD) {
-      if (this.state === STATE.PATROL && dist2D < DETECT_RANGE) this.state = STATE.CHASE;
+      if (this.state === STATE.PATROL && (dist2D < DETECT_RANGE || alerted)) this.state = STATE.CHASE;
       if (this.state === STATE.CHASE  && dist2D < ATTACK_RANGE)  this.state = STATE.ATTACK;
       if (this.state === STATE.ATTACK && dist2D > ATTACK_RANGE * 1.15) this.state = STATE.CHASE;
-      if (this.state === STATE.CHASE  && dist2D > LOSE_RANGE)    this.state = STATE.PATROL;
+      if (this.state === STATE.CHASE  && dist2D > LOSE_RANGE && !alerted) this.state = STATE.PATROL;
     }
 
     // Execute state
@@ -313,7 +330,7 @@ export class Enemy {
         this._burstLeft--;
         this._burstT = BURST_GAP;
         this._shoot(playerPos, proj, dist);
-        if (this._burstLeft === 0) this._shootT = SHOOT_INTERVAL + (Math.random() - 0.5) * 0.6;
+        if (this._burstLeft === 0) this._shootT = this._shootInterval + (Math.random() - 0.5) * 0.6;
       }
     } else {
       this._shootT -= dt;
@@ -338,10 +355,28 @@ export class Enemy {
     proj.spawn(origin, dir, { speed: 55, damage: 14 * this._dmgMult, faction: 'enemy', range: 120 });
   }
 
+  /**
+   * Wake this enemy up for `duration` seconds. While alerted, the enemy
+   * stays in (or upgrades to) CHASE regardless of distance and won't drop
+   * back to PATROL when the player moves beyond LOSE_RANGE. Used both for
+   * direct hits and for pack-wide propagation from nearby pals.
+   */
+  alert(duration = 12) {
+    if (this.dead) return;
+    if (this.state === STATE.PATROL || this.state === STATE.CHASE) {
+      this.state = STATE.CHASE;
+    }
+    this._alertedT = Math.max(this._alertedT, duration);
+  }
+
   takeDamage(amount) {
     if (this.dead) return;
     this.health -= amount;
     this._hitFlash = 0.1;
+    // Any incoming damage — even from across the map — wakes the enemy and
+    // any nearby pack-mates, so long-range sniping has consequences.
+    this.alert(12);
+    if (this.manager) this.manager.alertNearby(this, 28, 10);
     if (this.health <= 0) { this.health = 0; this._die(); }
   }
 
@@ -361,25 +396,59 @@ const SPAWN_POINTS = [
 ];
 
 export class EnemyManager {
-  constructor(scene, world, projectileSystem) {
+  constructor(scene, world, projectileSystem, difficulty = 'medium') {
     this.scene       = scene;
     this.world       = world;
     this.projectiles = projectileSystem;
     this.enemies     = [];
     this.onKill      = null; // (enemy) => void — wired by main.js
+    this.difficulty  = DIFFICULTY[difficulty] ? difficulty : 'medium';
     this._spawn();
   }
 
   _spawn() {
-    for (const sp of SPAWN_POINTS) {
+    const profile = DIFFICULTY[this.difficulty];
+    // Extra spawn points clone existing ones with small jitter — used when
+    // the difficulty profile asks for more enemies than SPAWN_POINTS holds.
+    const points = SPAWN_POINTS.slice();
+    const want   = Math.round(points.length * profile.count);
+    while (points.length < want) {
+      const src = SPAWN_POINTS[points.length % SPAWN_POINTS.length];
+      points.push({ x: src.x + (Math.random() - 0.5) * 12,
+                    z: src.z + (Math.random() - 0.5) * 12 });
+    }
+
+    for (const sp of points) {
       const h = this.world.getTerrainHeight(sp.x, sp.z);
       if (h < 0.5) continue;
       const e = new Enemy(
         this.scene, this.world,
         new THREE.Vector3(sp.x, h + FOOT_OFFSET, sp.z)
       );
+      e.maxHealth      = profile.hp;
+      e.health         = profile.hp;
+      e._dmgMult       = profile.dmg;
+      e._spdMult       = profile.spd;
+      e._shootInterval = SHOOT_INTERVAL / profile.fireRate;
+      e.manager        = this;          // back-ref for pack-wide alerts
       e.onDeath = (enemy) => { if (this.onKill) this.onKill(enemy); };
       this.enemies.push(e);
+    }
+  }
+
+  /**
+   * Propagate an alert to every alive enemy within `radius` of `source`.
+   * Triggered when one enemy takes damage so a sniper round wakes the
+   * whole patrol, not just the single bullet-stopper.
+   */
+  alertNearby(source, radius, duration = 10) {
+    const r2 = radius * radius;
+    const sp = source.root.position;
+    for (const e of this.enemies) {
+      if (e === source || e.dead) continue;
+      const dx = e.root.position.x - sp.x;
+      const dz = e.root.position.z - sp.z;
+      if (dx*dx + dz*dz < r2) e.alert(duration);
     }
   }
 
