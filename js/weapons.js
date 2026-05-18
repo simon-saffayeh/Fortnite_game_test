@@ -46,8 +46,8 @@ export const WEAPON_DEFS = {
   },
   sniper: {
     id: 'sniper', name: 'Sniper Rifle',
-    damage: 150, fireRate: 1.6, bulletSpeed: 600, range: 950,
-    spread: 0.003, magSize: 5, reloadTime: 3.2, ammoType: 'heavy',
+    damage: 125, fireRate: 1.6, bulletSpeed: 600, range: 950,
+    spread: 0.003, magSize: 1, reloadTime: 3.2, ammoType: 'heavy',
     rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
   },
   minigun: {

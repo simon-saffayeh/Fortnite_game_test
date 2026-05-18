@@ -131,7 +131,7 @@ export class RemotePlayer {
     if (hud) hud.appendChild(this._tag);
   }
 
-  setTargetState(pos, yaw, phase, weapon, ammo, reserve) {
+  setTargetState(pos, yaw, phase, weapon, ammo, reserve, health) {
     this._targetPos.set(pos[0], pos[1], pos[2]);
     this._targetYaw = yaw;
     if (phase !== undefined) this.phase = phase;
@@ -140,6 +140,8 @@ export class RemotePlayer {
     this.weaponId = weapon ?? null;
     this.ammo     = ammo    ?? null;
     this.reserve  = reserve ?? null;
+    // Authoritative health from victim — overrides local prediction
+    if (health !== undefined && !this.dead) this.health = health;
   }
 
   /**
@@ -156,7 +158,11 @@ export class RemotePlayer {
   takeDamage(amount) {
     if (this.dead) return;
     this.health = Math.max(0, this.health - amount);
-    if (this.health <= 0) this.die();
+    // Don't trigger death from local prediction — the victim has shield we
+    // can't see, so our health calc can be wrong. Death arrives authoritatively
+    // via the server's `death` message; killing locally would freeze the body
+    // and make bullets phase through a still-alive enemy (projectile.js skips
+    // rp.dead targets), creating an unkillable ghost.
   }
 
   die() {
@@ -298,15 +304,15 @@ export class NetworkManager {
   /** Any in-game client may declare match end (victory / spectator-end). */
   sendMatchEnd() { this.send({ type: 'matchEnd' }); }
   /**
-   * Broadcast our state. `weapon` (def id), `ammo` (loaded mag) and
-   * `reserve` (shared-pool reserve for the held weapon's ammoType) are
-   * optional but required for spectators to see live ammo readouts.
+   * Broadcast our state. `weapon` (def id), `ammo` (loaded mag),
+   * `reserve` (shared-pool reserve for the held weapon's ammoType) and
+   * `health` (authoritative HP so remotes show accurate bars). All optional.
    */
-  sendState(pos, yaw, phase = 3, weapon = null, ammo = null, reserve = null) {
+  sendState(pos, yaw, phase = 3, weapon = null, ammo = null, reserve = null, health = 100) {
     this.send({
       type: 'state',
       pos: [pos.x, pos.y, pos.z], yaw, phase,
-      weapon, ammo, reserve,
+      weapon, ammo, reserve, health,
     });
   }
   sendShoot(orig, dir, weapon) { this.send({ type: 'shoot', orig: [orig.x, orig.y, orig.z], dir: [dir.x, dir.y, dir.z], weapon }); }
@@ -417,7 +423,7 @@ export class NetworkManager {
       case 'state':
         if (this.remotePlayers.has(msg.id)) {
           this.remotePlayers.get(msg.id).setTargetState(
-            msg.pos, msg.yaw, msg.phase, msg.weapon, msg.ammo, msg.reserve,
+            msg.pos, msg.yaw, msg.phase, msg.weapon, msg.ammo, msg.reserve, msg.health,
           );
         }
         if (this.onRemoteState) this.onRemoteState(msg);

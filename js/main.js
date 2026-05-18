@@ -1779,7 +1779,8 @@ class Game {
           this._netTimer -= dt;
           if (this._netTimer <= 0) {
             this._netTimer = 0.033;
-            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt());
+            // Deploy phase: no weapon yet, send health for accurate HP bars.
+            this.net.sendState(this.player.getPosition(), this.player.getYaw(), this.deploy.getPhaseInt(), null, null, null, this.player.health);
           }
         }
         this.particles.update(dt);
@@ -1884,12 +1885,13 @@ class Game {
         this._netTimer -= dt;
         if (this._netTimer <= 0) {
           this._netTimer = 0.033;
-          // Include weapon + ammo so spectators can read live ammo counts.
+          // Include weapon + ammo so spectators can read live ammo counts,
+          // plus authoritative health so other clients render accurate HP bars.
           const a = this.inventory.getActive();
           const weaponId = (a && !a.isConsumable) ? a.def.id : null;
           const ammo     = (a && !a.isConsumable) ? a.ammo : null;
           const reserve  = (a && !a.isConsumable) ? a.displayReserve : null;
-          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3, weaponId, ammo, reserve);
+          this.net.sendState(this.player.getPosition(), this.player.getYaw(), 3, weaponId, ammo, reserve, this.player.health);
         }
       }
 
