@@ -58,56 +58,96 @@ export class RemotePlayer {
     this.root = new THREE.Group();
     this.scene.add(this.root);
 
-    const lm  = hex => new THREE.MeshLambertMaterial({ color: hex });
+    // Per-instance material cache — share materials across same-color parts so
+    // a 25-mesh character has ~6 materials instead of 25. Materials, not meshes,
+    // dominate draw-call cost in three.js.
+    const matCache = new Map();
+    const matFor = hex => {
+      let m = matCache.get(hex);
+      if (!m) { m = new THREE.MeshLambertMaterial({ color: hex }); matCache.set(hex, m); }
+      return m;
+    };
     const box = (w, h, d, hex, px, py, pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matFor(hex));
       m.position.set(px, py, pz);
       m.castShadow = true;
       return m;
     };
 
-    // Torso group — bobs vertically and leans during sprint
+    // ── Torso (bobs vertically, leans on sprint) ────────────────────────
     this._torso = new THREE.Group();
     this.root.add(this._torso);
-    this._torso.add(box(0.70, 0.90, 0.45, 0x8b0000, 0, 1.35, 0));  // torso
-    this._torso.add(box(0.72, 0.15, 0.47, 0x5a1a00, 0, 0.97, 0));  // belt
-    this._torso.add(box(0.65, 0.25, 0.42, 0x37474f, 0, 0.87, 0));  // hips
+    this._torso.add(box(0.70, 0.90, 0.45, 0x8b0000, 0, 1.35, 0));   // torso
+    this._torso.add(box(0.50, 0.55, 0.04, 0x5a1a00, 0, 1.42, 0.225)); // chest plate
+    this._torso.add(box(0.72, 0.15, 0.47, 0x5a1a00, 0, 0.97, 0));   // belt
+    this._torso.add(box(0.65, 0.25, 0.42, 0x37474f, 0, 0.87, 0));   // hips
 
-    // Head group — child of torso so it follows lean + bob
+    // ── Head (child of torso so it inherits lean) ────────────────────────
     this._head = new THREE.Group();
     this._head.position.set(0, 1.90, 0);
     this._torso.add(this._head);
     this._head.add(box(0.60, 0.58, 0.56, 0xffcba4, 0, 0, 0));
-    const helmGeo = new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6);
-    const helm    = new THREE.Mesh(helmGeo, lm(0x6a0000));
+    const helm = new THREE.Mesh(
+      new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6),
+      matFor(0x6a0000),
+    );
     helm.position.set(0, 0.05, 0);
+    helm.castShadow = true;
     this._head.add(helm);
+    // Visor — bright unshaded strip, no shadow casting (cheap, no lighting cost)
+    const visor = new THREE.Mesh(
+      new THREE.BoxGeometry(0.50, 0.08, 0.04),
+      new THREE.MeshBasicMaterial({ color: 0xff5533 }),
+    );
+    visor.position.set(0, -0.05, 0.28);
+    this._head.add(visor);
+    this._visor = visor;  // recolored by setTeammate
 
-    // Arm groups — pivot at the shoulder so they swing during walk/run
+    // ── Articulated arms ────────────────────────────────────────────────
+    // shoulder pivot ▶ upper arm + pauldron
+    //   └─ elbow pivot ▶ forearm + glove
     const buildArm = (sx) => {
-      const g = new THREE.Group();
-      g.position.set(sx, 1.65, 0);
-      // Upper arm hangs from the pivot, glove hangs from the bottom of the arm
-      g.add(box(0.22, 0.90, 0.22, 0x7a0000, 0, -0.45, 0));
-      g.add(box(0.22, 0.20, 0.22, 0x1a237e, 0, -0.93, 0));
-      return g;
+      const shoulder = new THREE.Group();
+      shoulder.position.set(sx, 1.65, 0);
+      shoulder.add(box(0.30, 0.14, 0.28, 0x5a1a00, 0, 0.00, 0));    // pauldron
+      shoulder.add(box(0.22, 0.50, 0.22, 0x7a0000, 0, -0.28, 0));   // upper arm
+      const elbow = new THREE.Group();
+      elbow.position.set(0, -0.55, 0);
+      elbow.add(box(0.20, 0.45, 0.20, 0xffcba4, 0, -0.22, 0));      // forearm (skin)
+      elbow.add(box(0.22, 0.18, 0.22, 0x1a237e, 0, -0.53, 0));      // glove
+      shoulder.add(elbow);
+      return { shoulder, elbow };
     };
-    this._leftArm  = buildArm(-0.48);
-    this._rightArm = buildArm( 0.48);
+    const la = buildArm(-0.48);
+    const ra = buildArm( 0.48);
+    this._leftArm    = la.shoulder;
+    this._leftElbow  = la.elbow;
+    this._rightArm   = ra.shoulder;
+    this._rightElbow = ra.elbow;
     this._torso.add(this._leftArm);
     this._torso.add(this._rightArm);
 
-    // Leg groups — pivot at the hip
+    // ── Articulated legs ────────────────────────────────────────────────
+    // hip pivot ▶ thigh + kneepad (fixed at joint)
+    //   └─ knee pivot ▶ shin + boot
     const buildLeg = (sx) => {
-      const g = new THREE.Group();
-      g.position.set(sx, 1.00, 0);
-      // Thigh + boot hang down from the pivot
-      g.add(box(0.26, 1.00, 0.26, 0x37474f, 0, -0.50, 0));
-      g.add(box(0.26, 0.22, 0.34, 0x212121, 0, -1.01, 0.04));
-      return g;
+      const hip = new THREE.Group();
+      hip.position.set(sx, 1.00, 0);
+      hip.add(box(0.26, 0.55, 0.26, 0x37474f, 0, -0.275, 0));       // thigh
+      hip.add(box(0.28, 0.10, 0.08, 0x1a1a22, 0, -0.55, 0.10));     // kneepad
+      const knee = new THREE.Group();
+      knee.position.set(0, -0.55, 0);
+      knee.add(box(0.23, 0.42, 0.23, 0x37474f, 0, -0.21, 0));       // shin
+      knee.add(box(0.26, 0.18, 0.34, 0x212121, 0, -0.51, 0.04));    // boot
+      hip.add(knee);
+      return { hip, knee };
     };
-    this._leftLeg  = buildLeg(-0.20);
-    this._rightLeg = buildLeg( 0.20);
+    const ll = buildLeg(-0.20);
+    const rl = buildLeg( 0.20);
+    this._leftLeg   = ll.hip;
+    this._leftKnee  = ll.knee;
+    this._rightLeg  = rl.hip;
+    this._rightKnee = rl.knee;
     this.root.add(this._leftLeg);
     this.root.add(this._rightLeg);
 
@@ -181,6 +221,7 @@ export class RemotePlayer {
   setTeammate(isTeammate) {
     this.isTeammate = !!isTeammate;
     if (this._hpFill) this._hpFill.material.color.setHex(isTeammate ? 0x22dd66 : 0xee2222);
+    if (this._visor)  this._visor.material.color.setHex(isTeammate ? 0x33ff88 : 0xff5533);
     if (this._tag) this._tag.classList.toggle('teammate', !!isTeammate);
   }
 
@@ -215,11 +256,16 @@ export class RemotePlayer {
     if (this.dead) {
       // Limbs go limp — soft easing back to neutral while the body topples.
       const ease = 1 - Math.exp(-6 * dt);
-      this._leftLeg.rotation.x  *= 1 - ease;
-      this._rightLeg.rotation.x *= 1 - ease;
-      this._leftArm.rotation.x  *= 1 - ease;
-      this._rightArm.rotation.x *= 1 - ease;
-      this._torso.position.y    *= 1 - ease;
+      this._leftLeg.rotation.x   *= 1 - ease;
+      this._rightLeg.rotation.x  *= 1 - ease;
+      this._leftKnee.rotation.x  *= 1 - ease;
+      this._rightKnee.rotation.x *= 1 - ease;
+      this._leftArm.rotation.x   *= 1 - ease;
+      this._rightArm.rotation.x  *= 1 - ease;
+      this._leftElbow.rotation.x *= 1 - ease;
+      this._rightElbow.rotation.x*= 1 - ease;
+      this._torso.position.y     *= 1 - ease;
+      this._torso.rotation.x     *= 1 - ease;
       return;
     }
 
@@ -234,13 +280,19 @@ export class RemotePlayer {
 
     const airborne = this.phase === 1 || this.phase === 2;
     if (airborne) {
-      // Skydive / parachute pose — arms out, legs slightly back.
+      // Skydive / parachute pose — arms out, legs tucked, knees bent.
       const target = this.phase === 1 ? 1.55 : 0.7;
-      this._leftArm.rotation.x  = THREE.MathUtils.lerp(this._leftArm.rotation.x,  -target, 0.18);
-      this._rightArm.rotation.x = THREE.MathUtils.lerp(this._rightArm.rotation.x, -target, 0.18);
-      this._leftLeg.rotation.x  = THREE.MathUtils.lerp(this._leftLeg.rotation.x,  -0.25, 0.18);
-      this._rightLeg.rotation.x = THREE.MathUtils.lerp(this._rightLeg.rotation.x, -0.25, 0.18);
-      this._torso.position.y    = THREE.MathUtils.lerp(this._torso.position.y, 0, 0.2);
+      const k = 0.18;
+      this._leftArm.rotation.x   = THREE.MathUtils.lerp(this._leftArm.rotation.x,   -target, k);
+      this._rightArm.rotation.x  = THREE.MathUtils.lerp(this._rightArm.rotation.x,  -target, k);
+      this._leftElbow.rotation.x = THREE.MathUtils.lerp(this._leftElbow.rotation.x, 0.55,    k);
+      this._rightElbow.rotation.x= THREE.MathUtils.lerp(this._rightElbow.rotation.x,0.55,    k);
+      this._leftLeg.rotation.x   = THREE.MathUtils.lerp(this._leftLeg.rotation.x,  -0.25,   k);
+      this._rightLeg.rotation.x  = THREE.MathUtils.lerp(this._rightLeg.rotation.x, -0.25,   k);
+      this._leftKnee.rotation.x  = THREE.MathUtils.lerp(this._leftKnee.rotation.x,  0.70,   k);
+      this._rightKnee.rotation.x = THREE.MathUtils.lerp(this._rightKnee.rotation.x, 0.70,   k);
+      this._torso.position.y     = THREE.MathUtils.lerp(this._torso.position.y, 0, 0.2);
+      this._torso.rotation.x     = THREE.MathUtils.lerp(this._torso.rotation.x, 0, 0.2);
       return;
     }
 
@@ -251,44 +303,73 @@ export class RemotePlayer {
     const moving  = speed > 0.8;
 
     if (moving) {
-      const freq   = running ? 9.0 : 6.0;
-      const ampLeg = THREE.MathUtils.clamp(speed / (running ? 14 : 8), 0.2, 1.0) * (running ? 0.75 : 0.55);
-      const ampArm = ampLeg * 0.7;
+      const freq    = running ? 9.0 : 6.0;
+      const ampLeg  = THREE.MathUtils.clamp(speed / (running ? 14 : 8), 0.2, 1.0) * (running ? 0.55 : 0.40);
+      const ampArm  = ampLeg * 0.85;
+      const ampKnee = ampLeg * 1.6;             // knee bends harder than hip swings
+      const baseElbow = running ? 0.55 : 0.35;  // arms held bent during locomotion
       this._animPhase += dt * freq;
 
-      const sw = Math.sin(this._animPhase);
+      const sw  = Math.sin(this._animPhase);
+      const pSw = Math.max(0,  sw);   // positive half — left leg forward
+      const nSw = Math.max(0, -sw);   // negative half — right leg forward
+
+      // Hip swing (forward/back). Opposite phase per leg.
       this._leftLeg.rotation.x  =  sw * ampLeg;
       this._rightLeg.rotation.x = -sw * ampLeg;
+      // Knee bend — only when the leg swings forward, so the foot clears the ground
+      this._leftKnee.rotation.x  = pSw * ampKnee;
+      this._rightKnee.rotation.x = nSw * ampKnee;
+      // Arms counter-swing the legs (left arm goes back when left leg goes forward)
       this._leftArm.rotation.x  = -sw * ampArm;
       this._rightArm.rotation.x =  sw * ampArm;
+      // Elbows: constant relaxed bend + small bump when the arm swings forward
+      this._leftElbow.rotation.x  = baseElbow + nSw * 0.18;
+      this._rightElbow.rotation.x = baseElbow + pSw * 0.18;
 
-      // Subtle torso bob — twice the leg frequency so it lands on each step.
-      const bobAmt = (running ? 0.07 : 0.04) * Math.min(speed / 10, 1);
-      this._bobY = THREE.MathUtils.lerp(this._bobY, Math.abs(Math.sin(this._animPhase)) * bobAmt - bobAmt * 0.5, 1 - Math.exp(-14 * dt));
+      // Vertical torso bob — abs(sin) so it dips on each foot-plant.
+      const bobAmt = (running ? 0.08 : 0.04) * Math.min(speed / 10, 1);
+      this._bobY = THREE.MathUtils.lerp(this._bobY,
+        Math.abs(Math.sin(this._animPhase)) * bobAmt - bobAmt * 0.5,
+        1 - Math.exp(-14 * dt));
       this._torso.position.y = this._bobY;
+      // Forward lean — bigger when sprinting, subtle when walking.
+      const leanTarget = running ? 0.22 : 0.05;
+      this._torso.rotation.x = THREE.MathUtils.lerp(this._torso.rotation.x, leanTarget, 1 - Math.exp(-8 * dt));
     } else {
-      // Idle — soft easing toward neutral with a faint breathing rise/fall.
+      // Idle — ease limbs to relaxed pose with a faint breathing rise/fall.
       const ease = 1 - Math.exp(-7 * dt);
-      this._leftLeg.rotation.x  *= 1 - ease;
-      this._rightLeg.rotation.x *= 1 - ease;
-      this._leftArm.rotation.x  *= 1 - ease;
-      this._rightArm.rotation.x *= 1 - ease;
+      this._leftLeg.rotation.x   *= 1 - ease;
+      this._rightLeg.rotation.x  *= 1 - ease;
+      this._leftKnee.rotation.x  *= 1 - ease;
+      this._rightKnee.rotation.x *= 1 - ease;
+      this._leftArm.rotation.x   *= 1 - ease;
+      this._rightArm.rotation.x  *= 1 - ease;
+      // Elbows hold a constant slight bend so arms don't dangle dead-straight.
+      this._leftElbow.rotation.x  = THREE.MathUtils.lerp(this._leftElbow.rotation.x,  0.30, ease);
+      this._rightElbow.rotation.x = THREE.MathUtils.lerp(this._rightElbow.rotation.x, 0.30, ease);
       this._animPhase += dt * 1.4;
       this._torso.position.y = Math.sin(this._animPhase) * 0.012;
+      this._torso.rotation.x = THREE.MathUtils.lerp(this._torso.rotation.x, 0, ease);
     }
 
-    // Crouch pose — blended on top of walk/idle. Lowers torso + bends legs
-    // forward so the silhouette is visibly shorter. Eases between states.
+    // Crouch overlay — uses real knee bend now, so the pose reads clearly as
+    // crouched rather than just "shrunk".
     this._crouchBlend = THREE.MathUtils.lerp(
-      this._crouchBlend, this.crouching ? 1 : 0, 1 - Math.exp(-12 * dt)
+      this._crouchBlend, this.crouching ? 1 : 0, 1 - Math.exp(-12 * dt),
     );
     const cb = this._crouchBlend;
     if (cb > 0.005) {
-      this._torso.position.y    -= cb * 0.45;
-      this._leftLeg.rotation.x  += cb * 0.60;
-      this._rightLeg.rotation.x += cb * 0.60;
-      this._leftArm.rotation.x  += cb * 0.25;
-      this._rightArm.rotation.x += cb * 0.25;
+      this._torso.position.y     -= cb * 0.45;
+      this._torso.rotation.x     += cb * 0.10;   // slight forward stoop
+      this._leftLeg.rotation.x   += cb * 0.35;   // hips rotate forward
+      this._rightLeg.rotation.x  += cb * 0.35;
+      this._leftKnee.rotation.x  += cb * 1.00;   // knees fold hard
+      this._rightKnee.rotation.x += cb * 1.00;
+      this._leftArm.rotation.x   += cb * 0.20;
+      this._rightArm.rotation.x  += cb * 0.20;
+      this._leftElbow.rotation.x += cb * 0.25;
+      this._rightElbow.rotation.x+= cb * 0.25;
     }
   }
 

@@ -585,6 +585,12 @@ export class World {
         part.geo.applyMatrix4(treeMat);   // bake tree world transform
         buckets[part.bucket].push(part.geo);
       }
+
+      // Trunk collider — thin box, ~4m tall, covers torso-to-head level so
+      // bullets can't phase through a tree and players can hide behind one.
+      // The existing slab method + bounding-box early exit make this cheap
+      // even with ~600 trees: distant boxes drop out in a single subtract.
+      this.staticCollider.addBox(x, h, z, 0.30, 4.0, 0.30);
     }
 
     const addMerged = (geos, mat, castShadow) => {
