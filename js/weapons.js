@@ -453,7 +453,8 @@ export class WeaponPickup {
 }
 
 // ── Rarity spawn table ───────────────────────────────────────────────────────
-// Rarity weights: higher index = rarer. Weights must sum to 100.
+// Rarity weights: higher index = rarer. Weights are normalized at roll time
+// so they don't have to sum to 100.
 export const RARITY_POOL = [
   // Common
   { id: 'pistol',         weight: 25 },
@@ -474,7 +475,7 @@ export const RARITY_POOL = [
   // Mythic
   { id: 'minigun',        weight:  0.8},
   { id: 'phaseRifle',     weight:  0.5},
-  { id: 'bombLauncher',   weight:  0.3},
+  { id: 'bombLauncher',   weight:  2.0},
 ];
 
 /**
