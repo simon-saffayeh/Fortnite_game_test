@@ -508,7 +508,7 @@ class Game {
     this.renderer.shadowMap.enabled   = true;
     this.renderer.shadowMap.type      = THREE.PCFShadowMap;
     this.renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure  = 1.35;
+    this.renderer.toneMappingExposure  = 1.25;
     this.renderer.outputColorSpace    = THREE.SRGBColorSpace;
   }
 
@@ -530,6 +530,62 @@ class Game {
     // catches emissives (storm, sun, muzzle flashes, fire pits, supply-drop lids).
     const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.4, 0.85);
     this.composer.addPass(bloom);
+
+    // ── Cel-shaded outline pass ─────────────────────────────────────────
+    // Sobel-style edge detection on screen-space luminance — catches the
+    // sharp color/lighting discontinuities between flat-shaded box parts,
+    // which look like outlines around each piece (Fortnite/Borderlands feel).
+    // 8 texture samples per pixel, threshold-gated so subtle gradients
+    // don't outline themselves.
+    this._outlinePass = new ShaderPass({
+      uniforms: {
+        tDiffuse:    { value: null },
+        uResolution: { value: new THREE.Vector2(w, h) },
+        uStrength:   { value: 0.45 },  // 0..1 — how dark the outline is
+        uThreshold:  { value: 0.16 },  // luminance gap below this is ignored
+        uThickness:  { value: 1.0 },   // pixels — sample offset radius
+        uSaturate:   { value: 0.08 },  // 0..1 — extra saturation boost (cartoon)
+      },
+      vertexShader: /*glsl*/ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /*glsl*/ `
+        uniform sampler2D tDiffuse;
+        uniform vec2  uResolution;
+        uniform float uStrength;
+        uniform float uThreshold;
+        uniform float uThickness;
+        uniform float uSaturate;
+        varying vec2 vUv;
+        float lum(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+        void main() {
+          vec2 px = uThickness / uResolution;
+          // 4-direction Sobel (cardinal-only — half the cost of full 3x3
+          // Sobel and visually equivalent for outline purposes).
+          float lN = lum(texture2D(tDiffuse, vUv + vec2(0.0,  px.y)).rgb);
+          float lS = lum(texture2D(tDiffuse, vUv + vec2(0.0, -px.y)).rgb);
+          float lE = lum(texture2D(tDiffuse, vUv + vec2( px.x, 0.0)).rgb);
+          float lW = lum(texture2D(tDiffuse, vUv + vec2(-px.x, 0.0)).rgb);
+          float edge = abs(lN - lS) + abs(lE - lW);
+          edge = smoothstep(uThreshold, uThreshold + 0.15, edge);
+
+          vec3 col = texture2D(tDiffuse, vUv).rgb;
+          // Pseudo-toon: boost saturation by pushing each channel away from
+          // its grayscale equivalent. Cheap (no HSL conversion needed) and
+          // gives a stylized cartoon palette without per-material toon maps.
+          float g = lum(col);
+          col = mix(vec3(g), col, 1.0 + uSaturate);
+          // Edge → darken toward black.
+          col = mix(col, vec3(0.0), edge * uStrength);
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `,
+    });
+    this.composer.addPass(this._outlinePass);
 
     // Vignette + film grain pass. Vignette darkens corners; grain is a tiny
     // animated noise (~3% brightness wobble) for cinematic texture. Time
@@ -1089,6 +1145,10 @@ class Game {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
       this.composer?.setSize(window.innerWidth, window.innerHeight);
+      // Outline pass needs the new resolution so sample offsets stay 1px wide.
+      if (this._outlinePass) {
+        this._outlinePass.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+      }
     });
   }
 

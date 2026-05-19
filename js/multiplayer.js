@@ -83,23 +83,25 @@ export class RemotePlayer {
     this._torso.add(box(0.65, 0.25, 0.42, 0x37474f, 0, 0.87, 0));   // hips
 
     // ── Head (child of torso so it inherits lean) ────────────────────────
+    // Chibi proportions — head ~30% bigger than realistic so the silhouette
+    // reads cartoony at a distance (Fortnite/Funko-style).
     this._head = new THREE.Group();
-    this._head.position.set(0, 1.90, 0);
+    this._head.position.set(0, 2.00, 0);
     this._torso.add(this._head);
-    this._head.add(box(0.60, 0.58, 0.56, 0xffcba4, 0, 0, 0));
+    this._head.add(box(0.78, 0.72, 0.72, 0xffcba4, 0, 0, 0));
     const helm = new THREE.Mesh(
-      new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6),
+      new THREE.SphereGeometry(0.46, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6),
       matFor(0x6a0000),
     );
-    helm.position.set(0, 0.05, 0);
+    helm.position.set(0, 0.08, 0);
     helm.castShadow = true;
     this._head.add(helm);
     // Visor — bright unshaded strip, no shadow casting (cheap, no lighting cost)
     const visor = new THREE.Mesh(
-      new THREE.BoxGeometry(0.50, 0.08, 0.04),
+      new THREE.BoxGeometry(0.62, 0.10, 0.04),
       new THREE.MeshBasicMaterial({ color: 0xff5533 }),
     );
-    visor.position.set(0, -0.05, 0.28);
+    visor.position.set(0, -0.04, 0.36);
     this._head.add(visor);
     this._visor = visor;  // recolored by setTeammate
 
@@ -114,7 +116,7 @@ export class RemotePlayer {
       const elbow = new THREE.Group();
       elbow.position.set(0, -0.55, 0);
       elbow.add(box(0.20, 0.45, 0.20, 0xffcba4, 0, -0.22, 0));      // forearm (skin)
-      elbow.add(box(0.22, 0.18, 0.22, 0x1a237e, 0, -0.53, 0));      // glove
+      elbow.add(box(0.30, 0.25, 0.30, 0x1a237e, 0, -0.57, 0.02));   // chunky glove (chibi)
       shoulder.add(elbow);
       return { shoulder, elbow };
     };
@@ -138,7 +140,7 @@ export class RemotePlayer {
       const knee = new THREE.Group();
       knee.position.set(0, -0.55, 0);
       knee.add(box(0.23, 0.42, 0.23, 0x37474f, 0, -0.21, 0));       // shin
-      knee.add(box(0.26, 0.18, 0.34, 0x212121, 0, -0.51, 0.04));    // boot
+      knee.add(box(0.34, 0.22, 0.42, 0x212121, 0, -0.53, 0.06));    // chunky boot (chibi)
       hip.add(knee);
       return { hip, knee };
     };

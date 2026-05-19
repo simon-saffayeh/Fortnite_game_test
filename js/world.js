@@ -242,11 +242,13 @@ export class World {
 
   // ── Lights ──────────────────────────────────────────────────────────
   _buildLights() {
-    // Sky/ground hemisphere for natural ambient color separation
-    const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, 0.95);
+    // Slightly lifted ambient/sky compared to baseline so shadows stay
+    // colored rather than crushed-black, without the overcooked oversaturated
+    // look. Sun retains its original warm tone.
+    const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, 1.00);
     this.scene.add(hemi);
 
-    const ambient = new THREE.AmbientLight(0xbcd6ee, 0.55);
+    const ambient = new THREE.AmbientLight(0xbcd6ee, 0.60);
     this.scene.add(ambient);
 
     const sun = new THREE.DirectionalLight(0xfff1c8, 2.6);
