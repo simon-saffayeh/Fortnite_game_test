@@ -6,10 +6,15 @@ RISK_LEVEL: "medium"                 # low (safe edits) / medium (new features) 
 COMMIT_STYLE: "descriptive"          # descriptive / short
 
 ## BRANCH RULES — NON-NEGOTIABLE
-- ALWAYS confirm you are on `claude-improvements` before touching any file
-- Run `git branch` at the start of every session to verify
-- NEVER commit to `main`
-- If you are ever on `main`, run `git checkout claude-improvements` immediately and stop
+- NEVER commit to `main` directly
+- At the start of every session, create a new feature branch from `main`:
+  git checkout main
+  git pull origin main
+  git checkout -b feature/[short-description]
+  Example: feature/sniper-rifle, feature/zombie-pathfinding, feature/kill-feed
+- Do ALL work on the feature branch
+- Push the feature branch to origin when done
+- If you are ever on `main`, do not touch any files — branch off immediately
 
 ## WHAT THIS GAME IS
 Battle Isle is a multiplayer browser-based battle royale game.
@@ -96,16 +101,21 @@ Use clear messages like:
 ## IF SOMETHING BREAKS OR FEELS RISKY
 1. Stop immediately
 2. Create NOTES.md explaining what you tried and why you stopped
-3. Commit only NOTES.md with message "note: stopped — see NOTES.md"
-4. Do not attempt to fix it — leave it for human review
+3. Commit only NOTES.md to the feature branch with message "note: stopped — see NOTES.md"
+4. Push the feature branch
+5. Do not attempt to fix it — leave it for human review
 
 ## START OF EVERY SESSION CHECKLIST
-1. Run `git branch` — must show * claude-improvements
-2. Run `git log --oneline -10` — see what was done, never repeat it
-3. Read all relevant files before touching anything
-4. Pick ONE improvement matching IMPROVEMENT_FOCUS
-5. Touch as many files as needed to implement it completely
-6. No half-finished code — the feature must work end to end
-7. Check for syntax errors before committing
-8. Commit with descriptive message
-9. Push: git push origin claude-improvements
+1. Checkout main and pull latest:
+   git checkout main
+   git pull origin main
+2. Run `git log --oneline -10` — see what was recently merged, never repeat it
+3. Pick ONE improvement matching IMPROVEMENT_FOCUS
+4. Create a feature branch:
+   git checkout -b feature/[short-description]
+5. Read all relevant files before touching anything
+6. Touch as many files as needed to implement it completely
+7. No half-finished code — the feature must work end to end
+8. Check for syntax errors before committing
+9. Commit with descriptive message
+10. Push: git push origin feature/[short-description]
