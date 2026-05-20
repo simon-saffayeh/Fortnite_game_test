@@ -27,6 +27,7 @@ export class HUD {
     this._buildEnemiesRemaining();
     this._buildPickupMessage();
     this._buildHealBar();
+    this._buildStreakBanner();
 
     this._staticMap      = this._prerenderStaticMap();
     this._mmTimer        = 0;
@@ -258,15 +259,82 @@ export class HUD {
     this._killFeed.id = 'kill-feed';
     document.getElementById('hud').appendChild(this._killFeed);
     this._kills = 0;
+    // Sliding-window kill timestamps for multi-kill detection.
+    this._streakTimes = [];
+    // STREAK_WINDOW: chain kills landing within this many seconds count
+    // toward the same multi-kill. 2.5s feels punchy without rewarding
+    // unrelated kills that just happen to land close together.
+    this._streakWindow = 2.5;
   }
 
-  addKill(name = 'Enemy') {
+  /**
+   * Record a kill for the local player.
+   * @param {string} name        victim label shown in the feed
+   * @param {Object} [opts]
+   * @param {boolean} [opts.headshot]  flags the kill-feed entry visually
+   */
+  addKill(name = 'Enemy', opts = {}) {
+    const { headshot = false } = opts;
     this._kills++;
     const entry = document.createElement('div');
-    entry.className = 'kf-entry';
-    entry.textContent = `✕ ${name} eliminated`;
+    entry.className = 'kf-entry' + (headshot ? ' kf-headshot' : '');
+    entry.textContent = headshot
+      ? `✕ HEADSHOT — ${name}`
+      : `✕ ${name} eliminated`;
     this._killFeed.prepend(entry);
     setTimeout(() => entry.remove(), 4000);
+
+    // First-blood banner: only the first kill of the match. Multi-kill
+    // banners cascade from later kills via the sliding window below.
+    if (this._kills === 1) {
+      this.showStreakBanner('FIRST BLOOD', 1);
+    }
+
+    // Multi-kill: keep only timestamps within the streak window, then
+    // announce on 2+ kills in that window.
+    const now = performance.now() / 1000;
+    this._streakTimes = this._streakTimes.filter(t => now - t < this._streakWindow);
+    this._streakTimes.push(now);
+    const chain = this._streakTimes.length;
+    if (chain >= 2) {
+      const labels = {
+        2: 'DOUBLE KILL', 3: 'TRIPLE KILL', 4: 'QUAD KILL',
+      };
+      const label = labels[chain] ?? `MEGA KILL ×${chain}`;
+      this.showStreakBanner(label, chain);
+    }
+  }
+
+  // ── Streak banner (multi-kill announcement) ──────────────────────────────
+  _buildStreakBanner() {
+    this._streakBanner = document.createElement('div');
+    this._streakBanner.id = 'streak-banner';
+    this._streakBanner.style.opacity = '0';
+    document.getElementById('hud').appendChild(this._streakBanner);
+  }
+
+  /**
+   * @param {string} text
+   * @param {number} tier  1 = first-blood / single, 2+ = multi-kill count.
+   *                       Drives color so higher chains get hotter.
+   */
+  showStreakBanner(text, tier = 1) {
+    const el = this._streakBanner;
+    if (!el) return;
+    // Color ramp: gold → orange → red as the chain climbs. Capped at red
+    // so 5+ kills stay readable instead of becoming pure white-hot.
+    const colors = ['#ffd95a', '#ffb347', '#ff7733', '#ff3322'];
+    el.style.color = colors[Math.min(tier - 1, colors.length - 1)];
+    el.textContent = text;
+    // Restart the CSS animation by toggling the class off and on
+    el.classList.remove('show');
+    void el.offsetWidth;
+    el.classList.add('show');
+    el.style.opacity = '1';
+    clearTimeout(this._streakBannerTimer);
+    this._streakBannerTimer = setTimeout(() => {
+      el.style.opacity = '0';
+    }, 1600);
   }
 
   // ── Damage overlay (red flash) ────────────────────────────────────────────

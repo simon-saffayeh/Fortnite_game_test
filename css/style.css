@@ -194,8 +194,38 @@ body {
   font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.85);
   animation: kfSlide 0.2s ease, kfFade 4s ease forwards;
 }
+.kf-entry.kf-headshot {
+  border-left-color: #ffd95a;
+  color: #ffe88a;
+  text-shadow: 0 0 6px rgba(255,200,0,0.5);
+}
 @keyframes kfSlide { from { transform: translateX(20px); opacity: 0; } }
 @keyframes kfFade  { 0%,75% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ── Multi-kill streak banner ──────────────────────────────────────────── */
+#streak-banner {
+  position: absolute; top: 32%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 44px; font-weight: 900; letter-spacing: 8px;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 18px rgba(0,0,0,0.85),
+    0 2px 14px rgba(0,0,0,0.9),
+    0 0 26px currentColor;
+  pointer-events: none;
+  transition: opacity 0.55s ease;
+  will-change: transform, opacity;
+}
+#streak-banner.show {
+  animation: streakPop 1.6s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+@keyframes streakPop {
+  0%   { transform: translate(-50%, -50%) scale(0.4); opacity: 0; }
+  18%  { transform: translate(-50%, -50%) scale(1.18); opacity: 1; }
+  30%  { transform: translate(-50%, -50%) scale(1.0); }
+  70%  { transform: translate(-50%, -50%) scale(1.04); opacity: 1; }
+  100% { transform: translate(-50%, -52%) scale(1.0); opacity: 0; }
+}
 
 /* ── Death / Victory screens ────────────────────────────────────────────── */
 #death-screen, #victory-screen {

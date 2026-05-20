@@ -226,10 +226,17 @@ export class ProjectileSystem {
           // without triggering hit markers, damage, or kill credit.
           if (rp.dead || rp.isTeammate) continue;
           if (segmentSphere(b.prevPosition, b.position, rp.getCenter(), 0.95)) {
-            if (particles) particles.spawnBurst(b.position.clone(), {
-              count: 12, color: 0xff2200, speed: 4, lifetime: 0.3, size: 0.15,
-            });
-            if (this.onRemotePlayerHit) this.onRemotePlayerHit(targetId, b.damage);
+            // Same height check used for enemies — neck-line and above.
+            const headshot = b.position.y > rp.root.position.y + 1.6;
+            const finalDmg = headshot ? b.damage * 1.5 : b.damage;
+            if (particles) {
+              if (headshot) {
+                particles.spawnBurst(b.position.clone(), { count: 18, color: 0xffdd00, speed: 5, lifetime: 0.35, size: 0.16 });
+              } else {
+                particles.spawnBurst(b.position.clone(), { count: 12, color: 0xff2200, speed: 4, lifetime: 0.3, size: 0.15 });
+              }
+            }
+            if (this.onRemotePlayerHit) this.onRemotePlayerHit(targetId, finalDmg, b.position.clone(), headshot);
             this._kill(b);
             break;
           }
