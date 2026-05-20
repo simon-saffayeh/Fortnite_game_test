@@ -109,6 +109,40 @@ class StaticCollider {
     return false;
   }
 
+  /**
+   * Like checkBullet but returns the parametric distance (0..1) along the
+   * segment where the first wall hit occurs, or 1 if the segment passes
+   * cleanly. Used to truncate visual beams (laser, tracer) so they don't
+   * pierce walls even though the damage projectile already stops cleanly.
+   */
+  raycastDistance(p0, p1) {
+    const dx = p1.x - p0.x, dy = p1.y - p0.y, dz = p1.z - p0.z;
+    let bestT = 1;
+    for (const b of this._boxes) {
+      const x0 = b.cx - b.hw, x1 = b.cx + b.hw;
+      const y0 = b.y,         y1 = b.y + b.height;
+      const z0 = b.cz - b.hd, z1 = b.cz + b.hd;
+      let tmin = 0, tmax = 1;
+      for (const [o, d, lo, hi] of [
+        [p0.x, dx, x0, x1],
+        [p0.y, dy, y0, y1],
+        [p0.z, dz, z0, z1],
+      ]) {
+        if (Math.abs(d) < 1e-9) {
+          if (o < lo || o > hi) { tmin = 1; break; }
+        } else {
+          let t1 = (lo - o) / d, t2 = (hi - o) / d;
+          if (t1 > t2) { const tmp = t1; t1 = t2; t2 = tmp; }
+          tmin = Math.max(tmin, t1);
+          tmax = Math.min(tmax, t2);
+          if (tmin > tmax) break;
+        }
+      }
+      if (tmin <= tmax && tmin >= 0 && tmin < bestT) bestT = tmin;
+    }
+    return bestT;
+  }
+
   getWallPush(wx, wy, wz, radius) {
     let pushX = 0, pushZ = 0;
     for (const b of this._boxes) {
@@ -748,24 +782,10 @@ export class World {
     // player stands flush with the visible concrete pad.
     sc.addFloor(-128, h + 0.05, 50, 10, 15);       // cellblock floor
     sc.addFloor(-107, h + 0.05, 50, 10, 11);       // exercise yard floor
-    sc.addBox(-110, h, 50,   1.5, 5,  10);
-    // Barracks walls (w=10,h=4.5,d=8 → hw=5,hh=4.5,hd=4, doorW=2.2→dw=1.1)
-    { const t=0.15,cx=-130,cz=63,hw=5,hh=4.5,hd=4,dw=1.1;
-      sc.addBox(cx, h, cz+hd, hw, hh, t);
-      sc.addBox(cx-hw, h, cz, t, hh, hd);
-      sc.addBox(cx+hw, h, cz, t, hh, hd);
-      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
-      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
-    }
-    sc.addFloor(-130, h+.05, 63, 4.8, 3.8);
-    // Armory walls (w=6,h=4,d=5 → hw=3,hh=4,hd=2.5, doorW=2.0→dw=1.0)
-    { const t=0.15,cx=-142,cz=63,hw=3,hh=4,hd=2.5,dw=1.0;
-      sc.addBox(cx, h, cz+hd, hw, hh, t);
-      sc.addBox(cx-hw, h, cz, t, hh, hd);
-      sc.addBox(cx+hw, h, cz, t, hh, hd);
-      sc.addBox(cx-(hw-dw)/2-dw/2, h, cz-hd, (hw-dw)/2, hh, t);
-      sc.addBox(cx+(hw-dw)/2+dw/2, h, cz-hd, (hw-dw)/2, hh, t);
-    }
+    // (Removed: phantom "barracks" + "armory" collision rooms. They had
+    // no visible meshes in _makeFranksJail and created invisible walls —
+    // notably the barracks south wall at z=59, which sliced through the
+    // cellblock interior.)
 
     // ── Ancient Temple ───────────────────────────────────────────────
     h = Math.max(0, this._getHeight(35, -160));

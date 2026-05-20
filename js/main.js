@@ -12,6 +12,7 @@ import { WeaponSystem, WeaponInstance, WeaponPickup, WEAPON_DEFS, buildGunModel 
 import { Inventory }         from './inventory.js';
 import { ProjectileSystem }  from './projectile.js';
 import { EnemyManager }      from './enemy.js';
+import { MsFranksManager, spawnProtractorBlast, tickProtractorLasers } from './boss.js';
 import { Storm }             from './storm.js';
 import { PickupManager, CONSUMABLE_DEFS } from './pickups.js';
 import { ScreenShake, MuzzleFlash, DamageNumbers, DirectionalDamage, HitMarker } from './effects.js';
@@ -709,6 +710,23 @@ class Game {
       this.net.spawnRemotePlayers(this.scene, mpSpawnVecs);
     }
 
+    // ── Ms. Franks (Frank's Jail boss) ──────────────────────────────────
+    // Solo + multiplayer both get her; zombie mode is its own thing so we
+    // skip it there. Host-authoritative in MP; passive shell on non-hosts.
+    if (this.mode !== 'zombie') {
+      this.bossManager = new MsFranksManager({
+        scene:            this.scene,
+        world:            this.world,
+        projectileSystem: this.projectiles,
+        weapons:          this.weapons,
+        particles:        this.particles,
+        net:              this.net,
+      });
+      this.projectiles.bossManager = this.bossManager;
+    } else {
+      this.bossManager = null;
+    }
+
     // ── 6. Effects, audio, building ───────────────────────────────────
     step(this.mode === 'solo' ? 'Deploying enemies…' : 'Connecting players…', 75);
 
@@ -993,6 +1011,12 @@ class Game {
           range:   def?.range ?? 300,
           def,
         });
+        // Protractor Beam fan visual — local damage isn't replicated for
+        // shotgun-style weapons, but the cool laser blast should be visible
+        // to everyone (spectators included) when a remote player fires it.
+        if (msg.weapon === 'protractorBeam') {
+          spawnProtractorBlast(this.scene, this.world, this.particles, orig, dir);
+        }
         if (this.audio && msg.weapon) {
           const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0);
           this.audio.playAt(msg.weapon, orig, this.player.getPosition(), right);
@@ -1204,6 +1228,13 @@ class Game {
         speed: weapon.def.bulletSpeed, damage: weapon.def.damage,
         faction: 'player', range: weapon.def.range, def: weapon.def,
       });
+    }
+
+    // Protractor Beam — also spawn the laser-fan + muzzle blast so the
+    // player's shot looks identical to Ms. Franks'. The actual damage is
+    // handled by the random-spread pellets above; this is pure visual.
+    if (weapon.def.id === 'protractorBeam') {
+      spawnProtractorBlast(this.scene, this.world, this.particles, origin, camDir);
     }
 
     // Local gunshot audio — one shot per bullet (semi- and full-auto alike)
@@ -1952,10 +1983,13 @@ class Game {
         this.spectator.update(dt);
         if (this.storm) this.storm.update(dt, this.player);     // damage call is a no-op once dead
         if (this.net)   this.net.update(dt, this.camera, this.canvas);
+        // Boss keeps animating + receiving state broadcasts while spectating.
+        if (this.bossManager) this.bossManager.update(dt, this.player, this.camera);
         // Bullets fired by remaining players are still in flight; keep them moving.
         const remotes_s = this.net ? this.net.getRemotePlayers() : null;
         this.projectiles.update(dt, this.player, null, this.particles, remotes_s);
         this.particles.update(dt);
+        tickProtractorLasers(dt);
         this.shake.update(dt);
         this.hud.update(dt);
         // Still broadcast our "spectating" phase so other clients can hide our model.
@@ -2006,6 +2040,7 @@ class Game {
       this.projectiles.update(dt, this.player, activeEnemies, this.particles, remotes);
 
       if (this.enemies)     this.enemies.update(dt, this.player, this.camera);
+      if (this.bossManager) this.bossManager.update(dt, this.player, this.camera);
       if (this.zombieWaves) {
         this.zombieWaves.update(dt, this.player, this.camera);
         // Hide inter-wave countdown while fighting
@@ -2024,6 +2059,7 @@ class Game {
         this._updateSupplyHud();
       }
       this.particles.update(dt);
+      tickProtractorLasers(dt);
       this.shake.update(dt);
       this.muzzle.update(dt);
       this.dirDmg.update(dt);

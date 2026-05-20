@@ -114,6 +114,16 @@ export const WEAPON_DEFS = {
     rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 1,
     teleport: true, undroppable: true,
   },
+  // Protractor Beam — Ms. Franks' signature math weapon. Fires a 30° fan of
+  // 7 laser pellets per shot. Carries its own fixed reserve ('special' ammo
+  // type) so the player can't refill it from world ammo piles — when it's
+  // empty, it's empty. NOT in RARITY_POOL or DROP_WEAPONS — boss-only loot.
+  protractorBeam: {
+    id: 'protractorBeam', name: 'Protractor Beam',
+    damage: 16, fireRate: 0.55, bulletSpeed: 280, range: 110,
+    spread: 0.26, magSize: 6, reloadTime: 2.6, ammoType: 'special',
+    rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 7,
+  },
 };
 
 // ── Gun 3D model builder ─────────────────────────────────────────────────────
@@ -294,6 +304,53 @@ function _buildGunModelRaw(def, scale = 1) {
     const domeMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
     const dome = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), domeMat);
     dome.position.set(0, 0.16, 0.05); g.add(dome);
+
+  } else if (def.id === 'protractorBeam') {
+    // Math-teacher weapon: a half-circle protractor mounted on a stubby
+    // pistol body. The flat (diameter) edge sits on top, curve faces forward.
+    // Made from a thin ring half so it reads as a protractor at a glance.
+    const ringGeo = new THREE.RingGeometry(0.30, 0.36, 24, 1, 0, Math.PI);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xff3344, side: THREE.DoubleSide, transparent: true, opacity: 0.95,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = Math.PI / 2;          // lay flat (horizontal disc)
+    ring.rotation.z = Math.PI;              // curve points forward (-Z)
+    ring.position.set(0, 0.08, -0.18);
+    g.add(ring);
+    // Translucent fill so it has a "lens" feel rather than a wireframe.
+    const fillGeo = new THREE.CircleGeometry(0.30, 24, 0, Math.PI);
+    const fillMat = new THREE.MeshBasicMaterial({
+      color: 0xff5566, side: THREE.DoubleSide, transparent: true, opacity: 0.22,
+    });
+    const fill = new THREE.Mesh(fillGeo, fillMat);
+    fill.rotation.x = Math.PI / 2;
+    fill.rotation.z = Math.PI;
+    fill.position.set(0, 0.08, -0.18);
+    g.add(fill);
+    // Tick marks at 0°, 45°, 90°, 135°, 180° along the protractor curve.
+    for (let i = 0; i <= 4; i++) {
+      const a = (i / 4) * Math.PI;
+      const cx = Math.cos(a) * 0.33;
+      const cz = -Math.sin(a) * 0.33 - 0.18;
+      const tick = new THREE.Mesh(
+        new THREE.BoxGeometry(0.025, 0.02, 0.04),
+        m(0xffffff),
+      );
+      tick.position.set(cx, 0.08, cz);
+      g.add(tick);
+    }
+    // Stubby pistol body underneath the protractor.
+    g.add(box(0.11, 0.13, 0.40, 0x331122, 0,  0.00, -0.05));
+    g.add(box(0.08, 0.22, 0.13, 0x221111, 0, -0.16,  0.10));   // grip
+    g.add(box(0.04, 0.07, 0.13, 0x111111, 0, -0.10,  0.00));   // trigger
+    // Glowing focal node where the beams converge — center of the diameter.
+    const node = new THREE.Mesh(
+      new THREE.SphereGeometry(0.05, 8, 6),
+      new THREE.MeshBasicMaterial({ color: 0xffff66 }),
+    );
+    node.position.set(0, 0.08, -0.18);
+    g.add(node);
   }
 
   g.scale.setScalar(scale);

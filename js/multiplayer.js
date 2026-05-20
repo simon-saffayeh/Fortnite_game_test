@@ -473,6 +473,14 @@ export class NetworkManager {
     // pickup with the broadcast ammo state so spectators + other players
     // can see and re-collect it.
     this.onWeaponDropped = null; // (msg) => void
+
+    // Boss (Ms. Franks) sync. Host-authoritative: host broadcasts state
+    // and shots, non-hosts send hits, host broadcasts death. All callbacks
+    // are wired by MsFranksManager.
+    this.onBossState = null; // (msg) => void   host → all
+    this.onBossShoot = null; // (msg) => void   host → all
+    this.onBossHit   = null; // (msg) => void   any → host
+    this.onBossDied  = null; // (msg) => void   host → all
   }
 
   connect(url) {
@@ -545,6 +553,23 @@ export class NetworkManager {
   // Supply-drop sync.
   sendSupplyDropSpawn(data) { this.send({ type: 'supplyDropSpawn', ...data }); }
   sendSupplyDropOpen(id)    { this.send({ type: 'supplyDropOpen', dropId: id }); }
+
+  // ── Boss sync ─────────────────────────────────────────────────────────
+  // Host-only: periodic state + per-shot broadcasts.
+  sendBossState(data) { this.send({ type: 'bossState', ...data }); }
+  sendBossShoot(origin, dir) {
+    this.send({
+      type: 'bossShoot',
+      origin: [origin.x, origin.y, origin.z],
+      dir:    [dir.x,    dir.y,    dir.z],
+    });
+  }
+  /** Any client → host. Server only forwards to host. */
+  sendBossHit(damage) { this.send({ type: 'bossHit', damage }); }
+  /** Host only: declare boss death + drop location. */
+  sendBossDied(x, y, z, ammo, reserve) {
+    this.send({ type: 'bossDied', x, y, z, ammo, reserve });
+  }
 
   _handle(msg) {
     switch (msg.type) {
@@ -674,6 +699,24 @@ export class NetworkManager {
 
       case 'weaponDropped':
         if (this.onWeaponDropped) this.onWeaponDropped(msg);
+        break;
+
+      case 'bossState':
+        if (this.onBossState) this.onBossState(msg);
+        break;
+
+      case 'bossShoot':
+        if (this.onBossShoot) this.onBossShoot(msg);
+        break;
+
+      case 'bossHit':
+        // Server only forwards bossHit to the host; receiving it means
+        // we are the host and a non-host scored damage.
+        if (this.onBossHit) this.onBossHit(msg);
+        break;
+
+      case 'bossDied':
+        if (this.onBossDied) this.onBossDied(msg);
         break;
     }
   }

@@ -244,4 +244,5 @@ const WEAPON_NAMES = {
   dualPistols: 'Dual Pistols', rocketLauncher: 'Rocket Launcher',
   bombLauncher: 'Nuke Launcher', handCannon: 'Hand Cannon',
   crossbow: 'Crossbow', huntingRifle: 'Hunting Rifle', phaseRifle: 'Phase Rifle',
+  protractorBeam: 'Protractor Beam',
 };

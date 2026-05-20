@@ -36,6 +36,9 @@ class Bullet {
     this.faction  = opts.faction  ?? 'player';
     this.range    = opts.range    ?? 200;
     this.def      = opts.def      ?? null;
+    // Display name of whoever fired this — used in the death message so
+    // bosses don't get lumped in as "an enemy bot".
+    this.attacker = opts.attacker ?? null;
     this.traveled = 0;
     this.active   = true;
     this._vy      = 0; // vertical velocity for gravity arc
@@ -84,6 +87,10 @@ export class ProjectileSystem {
     this.onEnemyHit  = null;
     this.onPlayerHit = null;
     this.onExplosion = null; // (pos, defId) → void
+
+    // Optional MsFranksManager — when set, player bullets and explosions
+    // also test against the boss. Single-entity check so cost is negligible.
+    this.bossManager = null;
   }
 
   spawn(origin, direction, opts = {}) {
@@ -212,7 +219,7 @@ export class ProjectileSystem {
       // Enemy bullets → hit player
       if (b.faction === 'enemy') {
         if (segmentSphere(b.prevPosition, b.position, playerCenter, 0.88)) {
-          player.takeDamage(b.damage, false, b.spawnOrigin.clone(), 'an enemy bot');
+          player.takeDamage(b.damage, false, b.spawnOrigin.clone(), b.attacker ?? 'an enemy bot');
           if (this.onPlayerHit) this.onPlayerHit(b.spawnOrigin.clone());
           this._kill(b);
         }
@@ -235,6 +242,36 @@ export class ProjectileSystem {
           }
         }
         if (!b.active) continue;
+      }
+
+      // Player bullets → hit boss (Ms. Franks). Single-entity check before
+      // the enemy loop so explosives/bullets damage her even in MP where
+      // enemyManager is null.
+      const boss = this.bossManager?.getAliveBoss?.() ?? null;
+      if (boss) {
+        const bc = new THREE.Vector3(
+          boss.root.position.x,
+          boss.root.position.y + 1.1,
+          boss.root.position.z,
+        );
+        if (segmentSphere(b.prevPosition, b.position, bc, 1.05)) {
+          const headshot = b.position.y > boss.root.position.y + 1.95;
+          const finalDmg = headshot ? b.damage * 2 : b.damage;
+          const wasAlive = !boss.dead;
+          this.bossManager.applyHit(finalDmg);
+          if (particles) {
+            particles.spawnBurst(b.position.clone(), {
+              count: headshot ? 18 : 10,
+              color: headshot ? 0xffdd00 : 0xff3344,
+              speed: 5, lifetime: 0.3, size: 0.15,
+            });
+          }
+          if (this.onEnemyHit) {
+            this.onEnemyHit(b.position.clone(), finalDmg, boss, wasAlive && boss.dead, headshot);
+          }
+          this._kill(b);
+          continue;
+        }
       }
 
       // Player bullets → hit enemies
@@ -317,6 +354,20 @@ export class ProjectileSystem {
       player.takeDamage(dmg * (1 - pd / radius), false, pos.clone(), 'your own explosion');
     }
 
+    // Boss explosion damage — separate from enemyManager since the boss
+    // exists in MP too where enemyManager is null.
+    const boss = this.bossManager?.getAliveBoss?.() ?? null;
+    if (boss) {
+      const bx = boss.root.position;
+      const bd = Math.sqrt((bx.x-pos.x)**2 + (bx.y+1-pos.y)**2 + (bx.z-pos.z)**2);
+      if (bd < radius) {
+        const falloff = 1 - bd / radius;
+        const wasAlive = !boss.dead;
+        this.bossManager.applyHit(dmg * falloff);
+        if (this.onEnemyHit) this.onEnemyHit(bx.clone(), dmg * falloff, boss, wasAlive && boss.dead);
+      }
+    }
+
     if (enemyManager) {
       for (const e of enemyManager.enemies) {
         if (e.dead || !e.root) continue;
@@ -370,6 +421,20 @@ export class ProjectileSystem {
           const wasDead = e.dead;
           e.takeDamage(dmg * f);
           if (this.onEnemyHit) this.onEnemyHit(ex.clone(), dmg * f, e, !wasDead && e.dead);
+        }
+      }
+    }
+    // Nuke also damages the boss.
+    {
+      const boss = this.bossManager?.getAliveBoss?.() ?? null;
+      if (boss) {
+        const bx = boss.root.position;
+        const bd = Math.sqrt((bx.x-pos.x)**2 + (bx.y+1-pos.y)**2 + (bx.z-pos.z)**2);
+        if (bd < radius) {
+          const f = 1 - bd / radius;
+          const wasAlive = !boss.dead;
+          this.bossManager.applyHit(dmg * f);
+          if (this.onEnemyHit) this.onEnemyHit(bx.clone(), dmg * f, boss, wasAlive && boss.dead);
         }
       }
     }

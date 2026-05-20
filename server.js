@@ -279,6 +279,26 @@ function handleMessage(senderId, msg) {
       if (senderId !== hostId) return;
       broadcast({ ...msg, id: senderId }, senderId);
       break;
+
+    // Boss (Ms. Franks) sync. State / shoot / died are host-only broadcasts —
+    // we drop them from non-hosts so a misbehaving client can't fake boss state.
+    case 'bossState':
+    case 'bossShoot':
+    case 'bossDied':
+      if (senderId !== hostId) return;
+      broadcast({ ...msg, id: senderId }, senderId);
+      break;
+
+    // bossHit comes from any client — forward only to the host, who will
+    // authoritatively apply damage and (eventually) broadcast new state.
+    case 'bossHit': {
+      if (senderId === hostId) return;     // host damages directly, locally
+      const host = hostId != null ? players.get(hostId) : null;
+      if (host && host.socket) {
+        sendTo(host.socket, { ...msg, id: senderId });
+      }
+      break;
+    }
   }
 }
 
