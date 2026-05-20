@@ -28,7 +28,6 @@ export class HUD {
     this._buildPickupMessage();
     this._buildHealBar();
     this._buildStreakBanner();
-    this._buildCompass();
 
     this._staticMap      = this._prerenderStaticMap();
     this._mmTimer        = 0;
@@ -254,191 +253,6 @@ export class HUD {
     hint.textContent = progress >= 1 ? 'Done!' : 'Stand still!';
   }
 
-  // ── Compass bar ──────────────────────────────────────────────────────────
-  // Top-center strip showing player heading with markers for storm centre,
-  // supply drops, and teammates. The 360° label/tick strip is prerendered
-  // once into a backing canvas; each frame we blit the slice that matches
-  // the current yaw, then overlay live markers on top.
-  _buildCompass() {
-    // Visible canvas (what the player sees in the HUD).
-    this._cWidth   = 360;          // canvas width in px
-    this._cHeight  = 34;           // canvas height in px
-    this._cFovDeg  = 90;           // degrees visible across the strip
-    this._cPxPerDeg = this._cWidth / this._cFovDeg;
-
-    this._compass = document.createElement('canvas');
-    this._compass.id = 'compass-bar';
-    this._compass.width  = this._cWidth;
-    this._compass.height = this._cHeight;
-    document.getElementById('hud').appendChild(this._compass);
-    this._compassCtx = this._compass.getContext('2d');
-
-    this._prerenderCompassStrip();
-  }
-
-  _prerenderCompassStrip() {
-    // Strip covers 360° plus enough overlap on each side that the visible
-    // window can sit anywhere without seeing the seam.
-    const pxPerDeg = this._cPxPerDeg;
-    const stripDeg = 360 + this._cFovDeg;
-    const w = Math.ceil(stripDeg * pxPerDeg);
-    const h = this._cHeight;
-
-    const cv = document.createElement('canvas');
-    cv.width = w; cv.height = h;
-    const ctx = cv.getContext('2d');
-
-    ctx.font = 'bold 13px "Segoe UI", Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Ticks every 5°; medium every 15°; long with label every 45°.
-    // Drawn linearly from -FOV/2 to 360+FOV/2 so the wrap zone always has
-    // valid marks regardless of where the visible window lands.
-    for (let d = -this._cFovDeg / 2; d <= 360 + this._cFovDeg / 2; d += 5) {
-      const x = (d + this._cFovDeg / 2) * pxPerDeg;
-      const isLong  = d % 45 === 0;
-      const isMed   = d % 15 === 0;
-      const tickH   = isLong ? 12 : isMed ? 8 : 5;
-      ctx.strokeStyle = isLong ? '#ffffff' : isMed ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.3)';
-      ctx.lineWidth = isLong ? 2 : 1;
-      ctx.beginPath();
-      ctx.moveTo(x, 4);
-      ctx.lineTo(x, 4 + tickH);
-      ctx.stroke();
-    }
-
-    // Cardinal + ordinal labels.
-    const labels = [
-      { d:   0, t: 'N', c: '#ff6262' },  // North highlighted red so it's distinct
-      { d:  45, t: 'NE', c: '#ffffff' },
-      { d:  90, t: 'E', c: '#ffffff' },
-      { d: 135, t: 'SE', c: '#ffffff' },
-      { d: 180, t: 'S', c: '#ffffff' },
-      { d: 225, t: 'SW', c: '#ffffff' },
-      { d: 270, t: 'W', c: '#ffffff' },
-      { d: 315, t: 'NW', c: '#ffffff' },
-    ];
-    // Draw each label twice (at d and d+360) so the wrap zone always has it.
-    const drawAt = (deg, t, c) => {
-      const x = (deg + this._cFovDeg / 2) * pxPerDeg;
-      ctx.fillStyle = c;
-      ctx.fillText(t, x, h - 11);
-    };
-    for (const l of labels) {
-      drawAt(l.d, l.t, l.c);
-      if (l.d < this._cFovDeg / 2) drawAt(l.d + 360, l.t, l.c);
-      if (l.d > 360 - this._cFovDeg / 2) drawAt(l.d - 360, l.t, l.c);
-    }
-
-    this._compassStrip = cv;
-    // Total degrees represented in the strip's x axis = stripDeg (with the
-    // -FOV/2 offset baked in via xAt above).
-    this._compassStripPxPerDeg = pxPerDeg;
-  }
-
-  /**
-   * Player heading: 0° = facing north (-Z), 90° = east (+X), 180° = south,
-   * 270° = west. Convert from Three.js yaw where yaw=0 faces -Z.
-   */
-  _playerHeadingDeg() {
-    // yaw=0 → -Z (north → 0°); yaw=π/2 → -X (west → 270°).
-    // So heading_deg = (-yaw * 180/π) mod 360.
-    const yawDeg = -this.player.getYaw() * 180 / Math.PI;
-    return ((yawDeg % 360) + 360) % 360;
-  }
-
-  /** Bearing to a world-space (x,z) from the player, in degrees 0..360. */
-  _bearingTo(x, z) {
-    const pp = this.player.getPosition();
-    const dx = x - pp.x;
-    const dz = z - pp.z;
-    // atan2(dx, -dz) so +X=east=90°, -Z=north=0°.
-    const rad = Math.atan2(dx, -dz);
-    return ((rad * 180 / Math.PI) % 360 + 360) % 360;
-  }
-
-  _drawCompass() {
-    if (!this._compass || !this._compassStrip) return;
-    const ctx = this._compassCtx;
-    const W = this._cWidth, H = this._cHeight;
-
-    ctx.clearRect(0, 0, W, H);
-
-    // Translucent background pad so the strip reads against bright skies.
-    ctx.fillStyle = 'rgba(0,0,0,0.42)';
-    ctx.fillRect(0, 0, W, H);
-
-    // Blit the strip slice centered on the current heading. The strip's
-    // origin already includes the -FOV/2 offset, so we just shift by
-    // heading*pxPerDeg.
-    const heading = this._playerHeadingDeg();
-    const srcX    = heading * this._compassStripPxPerDeg;
-    ctx.drawImage(this._compassStrip, srcX, 0, W, H, 0, 0, W, H);
-
-    // Centre indicator: small downward chevron at the top edge.
-    ctx.fillStyle = '#ffd95a';
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - 6, 0);
-    ctx.lineTo(W / 2 + 6, 0);
-    ctx.lineTo(W / 2,     8);
-    ctx.closePath();
-    ctx.fill();
-
-    // ── Live markers ─────────────────────────────────────────────────────
-    // For each marker, compute relative bearing (marker - heading), shift
-    // into ±180, then drop only if outside the visible FOV.
-    const halfFov = this._cFovDeg / 2;
-    const drawPip = (relDeg, color, shape = 'circle') => {
-      // Wrap into -180..180
-      let r = ((relDeg + 540) % 360) - 180;
-      if (Math.abs(r) > halfFov) return;
-      const x = W / 2 + r * this._cPxPerDeg;
-      const y = H - 6;
-      ctx.fillStyle = color;
-      ctx.strokeStyle = '#000';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      if (shape === 'square') {
-        ctx.rect(x - 3.5, y - 3.5, 7, 7);
-      } else if (shape === 'diamond') {
-        ctx.moveTo(x, y - 4); ctx.lineTo(x + 4, y);
-        ctx.lineTo(x, y + 4); ctx.lineTo(x - 4, y); ctx.closePath();
-      } else {
-        ctx.arc(x, y, 3.5, 0, Math.PI * 2);
-      }
-      ctx.fill();
-      ctx.stroke();
-    };
-
-    // Storm centre (purple). Skip while the storm is still in the pre-bus
-    // pending state where the centre is meaningless to the player.
-    if (this.storm) {
-      const info = this.storm.getInfo();
-      if (info.state !== 'pending' && info.center) {
-        const bearing = this._bearingTo(info.center.x, info.center.z);
-        drawPip(bearing - this._playerHeadingDeg(), '#a276ff');
-      }
-    }
-
-    // Supply drops (gold square).
-    if (this._supplyDrops) {
-      for (const d of this._supplyDrops.getDrops()) {
-        const bearing = this._bearingTo(d.x, d.z);
-        drawPip(bearing - this._playerHeadingDeg(), '#ffaa00', 'square');
-      }
-    }
-
-    // Teammates (green diamond) in multiplayer.
-    if (this._net) {
-      for (const [, rp] of this._net.remotePlayers) {
-        if (!rp.isTeammate || rp.dead) continue;
-        const bearing = this._bearingTo(rp.root.position.x, rp.root.position.z);
-        drawPip(bearing - this._playerHeadingDeg(), '#4ade80', 'diamond');
-      }
-    }
-  }
-
   // ── Kill feed ─────────────────────────────────────────────────────────────
   _buildKillFeed() {
     this._killFeed = document.createElement('div');
@@ -549,7 +363,7 @@ export class HUD {
   // Multiplayer: needed so the minimap can render remote players with
   // teammate coloring. Solo / zombie modes leave this null.
   setNetwork(net)      { this._net           = net; }
-  // Compass markers — gold pip for each active drop on the compass strip.
+  // Held so future features (e.g. minimap drop markers) can read drop state.
   setSupplyDrops(sd)   { this._supplyDrops   = sd; }
 
   setEnemiesRemaining(count, total) {
@@ -626,7 +440,6 @@ export class HUD {
     this._updateStorm();
     this._updatePickupPrompt();
     this._updateCrosshair();
-    this._drawCompass();
 
     this._mmTimer += dt;
     if (this._mmTimer >= 0.1) {
