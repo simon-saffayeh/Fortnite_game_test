@@ -18,6 +18,12 @@ const ATTACK_RANGE    = 2.0;   // melee reach
 const ATTACK_COOLDOWN = 1.05;  // seconds between claw swings
 const CLAW_DAMAGE     = 11;    // base, scaled by _dmgMult
 
+// Group behaviour tunables
+const ALERT_RADIUS    = 35;    // world units — a hit/spot spreads aggro this far
+const SEP_RADIUS      = 1.8;   // minimum gap between two chasing zombies
+const SEP_FORCE       = 4.0;   // lateral push strength for separation
+const ALERT_FLASH_DUR = 0.40;  // seconds of orange flash on remote-alert
+
 const Z_STATE = { WANDER: 0, CHASE: 1, ATTACK: 2, DEAD: 3 };
 
 export class Zombie {
@@ -36,10 +42,12 @@ export class Zombie {
     this._wanderDir = Math.random() * Math.PI * 2;
     this._hitFlash  = 0;
     this._deathT    = 0;
-    this._attackT   = 0;          // cooldown timer
-    this._swing     = 0;          // claw-swing animation progress (0 idle)
-    this._lungeT    = 0;          // remaining lunge-burst time
-    this._lungeCD   = 1.5 + Math.random() * 2;
+    this._attackT      = 0;         // cooldown timer
+    this._swing        = 0;         // claw-swing animation progress (0 idle)
+    this._lungeT       = 0;         // remaining lunge-burst time
+    this._lungeCD      = 1.5 + Math.random() * 2;
+    this._justAggroed  = false;     // set this frame when transitioning WANDER→CHASE
+    this._alertFlash   = 0;         // orange flash timer for remote-aggro alert
     // Per-zombie silhouette variation
     this._scale     = 0.9 + Math.random() * 0.28;
     this._lean      = 0.18 + Math.random() * 0.16;
@@ -176,7 +184,7 @@ export class Zombie {
   }
 
   // ── AI Update ────────────────────────────────────────────────────────────
-  update(dt, player, projectileSystem, camera) {
+  update(dt, player, projectileSystem, camera, allZombies = null) {
     if (this.dead) {
       this._deathT += dt;
       if (this._deathT < 0.5) {
@@ -189,11 +197,13 @@ export class Zombie {
 
     this._t += dt;
 
-    // Hit flash
+    // Damage flash (white) takes priority over alert flash (orange)
     if (this._hitFlash > 0) {
       this._hitFlash -= dt;
-      const white = this._hitFlash > 0;
-      this._meshes.forEach((m, i) => m.material.color.setHex(white ? 0xffffff : this._origColors[i]));
+      this._meshes.forEach((m, i) => m.material.color.setHex(this._hitFlash > 0 ? 0xffffff : this._origColors[i]));
+    } else if (this._alertFlash > 0) {
+      this._alertFlash -= dt;
+      this._meshes.forEach((m, i) => m.material.color.setHex(this._alertFlash > 0 ? 0xff4400 : this._origColors[i]));
     }
 
     const pp = player.getPosition();
@@ -202,7 +212,10 @@ export class Zombie {
     const dist2D = Math.sqrt(dx * dx + dz * dz) || 0.0001;
 
     // State transitions — zombies lock on and never let go
-    if (this.state === Z_STATE.WANDER && dist2D < DETECT_RANGE) this.state = Z_STATE.CHASE;
+    if (this.state === Z_STATE.WANDER && dist2D < DETECT_RANGE) {
+      this.state = Z_STATE.CHASE;
+      this._justAggroed = true;    // will spread to nearby wanderers
+    }
     if (this.state === Z_STATE.CHASE  && dist2D < ATTACK_RANGE) this.state = Z_STATE.ATTACK;
     if (this.state === Z_STATE.ATTACK && dist2D > ATTACK_RANGE * 1.4) this.state = Z_STATE.CHASE;
 
@@ -213,7 +226,7 @@ export class Zombie {
     let walking = false;
     switch (this.state) {
       case Z_STATE.WANDER: walking = this._doWander(dt);                          break;
-      case Z_STATE.CHASE:  walking = this._doChase(dt, dx, dz, dist2D);            break;
+      case Z_STATE.CHASE:  walking = this._doChase(dt, dx, dz, dist2D, allZombies); break;
       case Z_STATE.ATTACK: this._doAttack(dt, dx, dz, dist2D, player);             break;
     }
 
@@ -239,7 +252,7 @@ export class Zombie {
     return true;
   }
 
-  _doChase(dt, dx, dz, dist) {
+  _doChase(dt, dx, dz, dist, allZombies = null) {
     const nx = dx / dist, nz = dz / dist;
     this.root.rotation.y = Math.atan2(nx, nz);
 
@@ -253,6 +266,22 @@ export class Zombie {
 
     this.root.position.x += nx * speed * dt;
     this.root.position.z += nz * speed * dt;
+
+    // Separation: push apart from nearby chasing zombies so they fan out
+    if (allZombies) {
+      for (const other of allZombies) {
+        if (other === this || other.dead) continue;
+        const odx = this.root.position.x - other.root.position.x;
+        const odz = this.root.position.z - other.root.position.z;
+        const odist = Math.sqrt(odx * odx + odz * odz);
+        if (odist > 0 && odist < SEP_RADIUS) {
+          const push = ((SEP_RADIUS - odist) / SEP_RADIUS) * SEP_FORCE;
+          this.root.position.x += (odx / odist) * push * dt;
+          this.root.position.z += (odz / odist) * push * dt;
+        }
+      }
+    }
+
     return true;
   }
 
@@ -314,6 +343,11 @@ export class Zombie {
     if (this.dead) return;
     this.health -= amount;
     this._hitFlash = 0.1;
+    // Being hit aggressively overrides any passive wandering
+    if (this.state === Z_STATE.WANDER) {
+      this.state = Z_STATE.CHASE;
+      this._justAggroed = true;
+    }
     if (this.health <= 0) { this.health = 0; this._die(); }
   }
 
@@ -385,7 +419,27 @@ export class ZombieWaveManager {
 
   update(dt, player, camera) {
     for (const e of this.enemies) {
-      e.update(dt, player, this.projectiles, camera);  // dead bodies still topple + clean up
+      e.update(dt, player, this.projectiles, camera, this.enemies);
+    }
+
+    // ── Group aggro spread ────────────────────────────────────────────────
+    // Any zombie that just transitioned WANDER→CHASE (spotted player or was
+    // shot) broadcasts its position: wandering zombies within ALERT_RADIUS
+    // immediately join the chase with an orange alert flash.
+    for (const e of this.enemies) {
+      if (!e._justAggroed) continue;
+      e._justAggroed = false;
+      const ex = e.root.position.x, ez = e.root.position.z;
+      const rSq = ALERT_RADIUS * ALERT_RADIUS;
+      for (const other of this.enemies) {
+        if (other === e || other.dead || other.state !== Z_STATE.WANDER) continue;
+        const dx = other.root.position.x - ex;
+        const dz = other.root.position.z - ez;
+        if (dx * dx + dz * dz < rSq) {
+          other.state = Z_STATE.CHASE;
+          other._alertFlash = ALERT_FLASH_DUR;
+        }
+      }
     }
 
     if (this.state === 'fighting') {
