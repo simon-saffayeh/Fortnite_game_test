@@ -910,7 +910,7 @@ class Game {
 
       this.enemies.onKill = (killedEnemy) => {
         this._killCount++;
-        this.hud.addKill('Enemy Soldier');
+        this.hud.addKill('Enemy Soldier', { headshot: !!killedEnemy._killedByHeadshot });
         this.hud.setEnemiesRemaining(this._totalEnemies - this._killCount, this._totalEnemies);
         if (Math.random() < 0.65) this.pickups.spawnLoot(killedEnemy.root.position);
         if (this._killCount >= this._totalEnemies && !this._victoryShown) {
@@ -925,7 +925,7 @@ class Game {
 
       this.zombieWaves.onKill = (e) => {
         this._killCount++;
-        this.hud.addKill('Zombie');
+        this.hud.addKill('Zombie', { headshot: !!e._killedByHeadshot });
         if (Math.random() < 0.5) this.pickups.spawnLoot(e.root.position);
         const alive = this.zombieWaves.aliveCount;
         this.hud.setEnemiesRemaining(alive, waveCount_hud(this.zombieWaves.wave));
@@ -964,9 +964,13 @@ class Game {
       this.net.onRemoteDeath = (msg) => {
         if (this._lastHitTarget === msg.id) {
           this._playerKills++;
-          this.hud.addKill(this.net.players.get(msg.id)?.name ?? 'Player');
+          this.hud.addKill(
+            this.net.players.get(msg.id)?.name ?? 'Player',
+            { headshot: !!this._lastHitWasHeadshot },
+          );
           this.hitMark.hit(true);
           this._lastHitTarget = null;
+          this._lastHitWasHeadshot = false;
         }
         // Spawn the dead player's loot drops at their body. Their client
         // attached the inventory contents to the death message before sending.
@@ -1023,16 +1027,21 @@ class Game {
         }
       };
 
-      this.projectiles.onRemotePlayerHit = (targetId, damage) => {
+      this.projectiles.onRemotePlayerHit = (targetId, damage, hitPos, headshot = false) => {
         this.net.sendHit(targetId, damage);
         this.hitMark.hit(false);
         this._lastHitTarget = targetId;
+        // Remember the headshot flag so onRemoteDeath can tag the kill-feed
+        // entry. Death messages arrive async over the wire, so the latest
+        // bullet hit's flag is the right one to attribute to the kill.
+        this._lastHitWasHeadshot = headshot;
 
         const rp = this.net.remotePlayers.get(targetId);
         if (rp) {
           rp.takeDamage(damage);
           const numPos = rp.getCenter().clone().add(new THREE.Vector3(0, 0.5, 0));
-          this.dmgNums.show(numPos, damage, this.camera, this.canvas, damage >= 80);
+          this.dmgNums.show(numPos, damage, this.camera, this.canvas, headshot || damage >= 80);
+          if (headshot) this.dmgNums.showHeadshot(numPos, this.camera, this.canvas);
         }
       };
     }
@@ -1042,10 +1051,19 @@ class Game {
       this.audio?.playAt(soundId, pos, this.player.getPosition(), right);
     };
 
-    this.projectiles.onEnemyHit = (pos, damage, _enemy, justKilled, headshot) => {
+    this.projectiles.onEnemyHit = (pos, damage, enemy, justKilled, headshot) => {
       const numPos = pos.clone().add(new THREE.Vector3(0, 0.8, 0));
       this.dmgNums.show(numPos, damage, this.camera, this.canvas, headshot);
-      if (justKilled) this.dmgNums.showKill(numPos, this.camera, this.canvas);
+      if (justKilled) {
+        this.dmgNums.showKill(numPos, this.camera, this.canvas);
+        // Stamp the kill so the enemy-manager's onKill callback can flag
+        // its kill-feed entry (and streak banner) as a headshot. Set on
+        // the enemy object because onKill receives it next.
+        if (enemy && headshot) enemy._killedByHeadshot = true;
+      } else if (headshot) {
+        // Non-fatal headshot still gets the floating tag for feedback.
+        this.dmgNums.showHeadshot(numPos, this.camera, this.canvas);
+      }
       this.hitMark.hit(justKilled);
     };
 
