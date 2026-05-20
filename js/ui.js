@@ -363,6 +363,8 @@ export class HUD {
   // Multiplayer: needed so the minimap can render remote players with
   // teammate coloring. Solo / zombie modes leave this null.
   setNetwork(net)      { this._net           = net; }
+  // Held so future features (e.g. minimap drop markers) can read drop state.
+  setSupplyDrops(sd)   { this._supplyDrops   = sd; }
 
   setEnemiesRemaining(count, total) {
     const el = document.getElementById('er-count');

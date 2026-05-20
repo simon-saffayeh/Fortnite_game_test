@@ -804,6 +804,7 @@ class Game {
     if (this.net) this.hud.setNetwork(this.net);
     this.hud.setWeaponSystem(this.weapons);
     this.hud.setPickupManager(this.pickups);
+    if (this.supplyDrops) this.hud.setSupplyDrops(this.supplyDrops);
     this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
 
     // Drop a slot → spawn a world pickup at the player's feet (forward
