@@ -225,8 +225,9 @@ export class Inventory {
     const s = this.slots[slotIdx];
     if (!s?.isConsumable) return;
     const p = this.player;
-    if (s.def.healHp    > 0) p.health = Math.min(p.maxHealth, p.health + s.def.healHp);
-    if (s.def.healShield > 0) p.healShield(s.def.healShield);
+    if (s.def.healHp     > 0) p.health = Math.min(p.maxHealth, p.health + s.def.healHp);
+    if (s.def.healShield  > 0) p.healShield(s.def.healShield);
+    if (s.def.healArmour  > 0) p.healArmour(s.def.healArmour);
     s.count--;
     if (s.count <= 0) {
       this.slots[slotIdx] = null;
