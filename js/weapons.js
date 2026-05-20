@@ -103,6 +103,12 @@ export const WEAPON_DEFS = {
     spread: 0.007, magSize: 1, reloadTime: 1.9, ammoType: 'medium',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
+  flamethrower: {
+    id: 'flamethrower', name: 'Flamethrower',
+    damage: 12, fireRate: 0.06, bulletSpeed: 95, range: 38,
+    spread: 0.20, magSize: 60, reloadTime: 2.8, ammoType: 'shells',
+    rarityColor: 0xff4400, rarity: 'Epic', auto: true, pellets: 1,
+  },
   // ── Unique weapons ───────────────────────────────────────────────────────────
   // Phase Rifle: bullet travels slowly — when it hits anything the player
   // instantly teleports to that location. Fire into a window, teleport inside.
@@ -293,6 +299,24 @@ function _buildGunModelRaw(def, scale = 1) {
     const crystalMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
     const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.045), crystalMat);
     crystal.position.set(0, 0.12, -0.15); g.add(crystal);
+
+  } else if (def.id === 'flamethrower') {
+    // Flamethrower: wide fuel tank body, thin nozzle, fuel valve on side
+    g.add(cyl(0.13, 0.86, 0x2a1a08, 0, 0, 0.02, Math.PI/2));          // main fuel tank
+    g.add(cyl(0.05, 0.50, 0x111111, 0, 0.04, -0.60, Math.PI/2));      // nozzle barrel
+    g.add(cyl(0.065, 0.07, def.rarityColor, 0, 0.04, -0.48, Math.PI/2)); // muzzle ring
+    g.add(cyl(0.075, 0.05, def.rarityColor, 0, 0.04, -0.87, Math.PI/2)); // nozzle tip
+    g.add(cyl(0.115, 0.07, 0x441100, 0, 0, 0.47, Math.PI/2));         // back cap
+    g.add(box(0.10, 0.28, 0.14, 0x1a0e00, 0, -0.22, 0.20));           // grip
+    g.add(box(0.04, 0.09, 0.16, 0x220800, 0, -0.10, 0.08));           // trigger
+    g.add(cyl(0.038, 0.12, 0x884422, -0.15, 0.04, 0.08, 0));          // side fuel valve
+    g.add(cyl(0.030, 0.10, 0x663311, -0.15, 0.04, 0.22, 0));          // valve pipe
+    // Emissive heat haze ring at nozzle
+    const nozzleMat = new THREE.MeshBasicMaterial({ color: 0xff6600, transparent: true, opacity: 0.7 });
+    const nozzle = new THREE.Mesh(new THREE.TorusGeometry(0.04, 0.015, 6, 12), nozzleMat);
+    nozzle.rotation.y = Math.PI / 2;
+    nozzle.position.set(0, 0.04, -0.88);
+    g.add(nozzle);
 
   } else if (def.id === 'bombLauncher') {
     g.add(cyl(0.14, 0.75, 0x1a0000, 0, 0, 0, Math.PI/2)); // fat tube
@@ -526,6 +550,7 @@ export const RARITY_POOL = [
   { id: 'dualPistols',    weight:  5 },
   { id: 'huntingRifle',   weight:  4 },
   { id: 'handCannon',     weight:  5 },
+  { id: 'flamethrower',   weight:  4 },
   // Legendary
   { id: 'sniper',         weight:  3 },
   { id: 'rocketLauncher', weight:  2 },
