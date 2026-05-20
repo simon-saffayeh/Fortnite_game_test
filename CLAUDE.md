@@ -1,9 +1,9 @@
-# Battle Isle — Claude Code Bot Rules
+# Battle Isle — Claude Code Bot
 
-## WHO YOU ARE
-You are an autonomous improvement bot running on a loop on a DigitalOcean server.
-You make ONE small, focused improvement per session, then commit it.
-A human will review your commits and merge them when ready.
+## PARAMETERS (tweak these to change bot behaviour)
+IMPROVEMENT_FOCUS: "balanced"        # options: gameplay / weapons / visuals / performance / balanced
+RISK_LEVEL: "medium"                 # low (safe edits) / medium (new features) / high (big changes)
+COMMIT_STYLE: "descriptive"          # descriptive / short
 
 ## BRANCH RULES — NON-NEGOTIABLE
 - ALWAYS confirm you are on `claude-improvements` before touching any file
@@ -21,73 +21,91 @@ Battle Isle is a multiplayer browser-based battle royale game.
 - Frontend is vanilla JS + HTML5 Canvas/WebGL, no frameworks
 
 ## FILE MAP
-- server.js        — HTTP static file server + WebSocket lobby/matchmaking. DO NOT change ports or the MAX_PLAYERS constant without a comment explaining why
-- index.html       — Main game page
-- js/main.js       — Game loop entry point
-- js/player.js     — Player state, movement, health
+- server.js         — HTTP static file server + WebSocket lobby. DO NOT TOUCH
+- index.html        — Main game page
+- js/main.js        — Game loop entry point
+- js/player.js      — Player state, movement, health
 - js/multiplayer.js — WebSocket client, sync logic
-- js/world.js      — Map/terrain generation using worldSeed
-- js/storm.js      — Storm shrink logic, clock sync
-- js/weapons.js    — Weapon definitions and stats
-- js/entities.js   — Game entity base class
-- js/zombie.js     — Zombie AI and behaviour
-- js/enemy.js      — Enemy logic
-- js/projectile.js — Bullet/projectile physics
-- js/inventory.js  — Player inventory system
-- js/pickups.js    — Loot and pickup logic
+- js/world.js       — Map/terrain generation using worldSeed
+- js/storm.js       — Storm shrink logic, clock sync
+- js/weapons.js     — Weapon definitions and stats
+- js/entities.js    — Game entity base class
+- js/zombie.js      — Zombie AI and behaviour
+- js/enemy.js       — Enemy logic
+- js/projectile.js  — Bullet/projectile physics
+- js/inventory.js   — Player inventory system
+- js/pickups.js     — Loot and pickup logic
 - js/supplyDrops.js — Supply drop events
-- js/building.js   — Building/structure logic
-- js/skydive.js    — Skydive/parachute opening sequence
-- js/camera.js     — Camera follow and zoom
-- js/ui.js         — HUD, health bar, inventory UI
-- js/audio.js      — Sound effect triggers
-- js/ammo.js       — Ammo types and counts
-- js/effects.js    — Visual effects
-- js/particles.js  — Particle system
-- js/spectator.js  — Spectator mode after death
-- css/style.css    — All styles
+- js/building.js    — Building/structure logic
+- js/skydive.js     — Skydive/parachute opening sequence
+- js/camera.js      — Camera follow and zoom
+- js/ui.js          — HUD, health bar, inventory UI
+- js/audio.js       — Sound effect triggers
+- js/ammo.js        — Ammo types and counts
+- js/effects.js     — Visual effects
+- js/particles.js   — Particle system
+- js/spectator.js   — Spectator mode after death
+- css/style.css     — All styles
 
-## GOOD IMPROVEMENTS TO MAKE
-Pick ONE from this list each session, or invent your own that fits the game:
+## GOOD IMPROVEMENTS (pick based on IMPROVEMENT_FOCUS above)
+### gameplay
 - Better zombie AI (pathfinding, group behaviour, aggro range)
-- More weapon variety or balance tweaks
-- Improved storm visual effects
-- Better particle effects for explosions, gunshots, impacts
-- Smoother player movement or animation
-- Better UI feedback (damage numbers, kill feed, kill counter)
-- Supply drop improvements (better timing, visual indicator)
-- Sound effect improvements (distance falloff, 3D audio)
-- Better spectator mode (follow players, free cam)
-- Performance optimisations (object pooling for particles/projectiles)
-- Better mobile/touch controls
-- Loot balance improvements
-- Building interaction improvements
-- Better skydive feel
+- Supply drop timing and visual indicator improvements
+- Storm pacing adjustments
+- Better loot balance
+- New game mechanics (revive system, armour plates)
 
-## DO NOT TOUCH
-- package.json (no new dependencies ever)
-- Port 3000 setting in server.js
-- MAX_PLAYERS constant in server.js
-- The worldSeed sync logic (it is delicate multiplayer code)
-- Any file in /textures or /sounds (binary assets)
+### weapons
+- New weapon types (sniper, crossbow, grenade launcher, flamethrower)
+- Weapon balance tweaks (damage, fire rate, reload time)
+- New ammo types
+- Weapon attachments (scope, silencer)
+
+### visuals
+- Better particle effects for explosions, gunshots, impacts
+- Improved storm visual (colour, edge glow)
+- Better skydive sequence
+- Damage numbers floating above enemies
+- Kill feed in top right corner
+
+### performance
+- Object pooling for particles and projectiles
+- Reduce unnecessary redraws
+- Optimise zombie pathfinding loops
+
+### balanced
+- Pick one from any category above that hasn't been done recently
+
+## DO NOT TOUCH — EVER
+- server.js
+- package.json
+- sounds/ folder
+- textures/ folder
 - .gitignore
+- The worldSeed sync logic in multiplayer.js (it is delicate)
+- Port 3000 in server.js
+- MAX_PLAYERS in server.js
 
 ## COMMIT FORMAT
-Use clear commit messages like:
+Use clear messages like:
+  "feature: added sniper rifle with scope zoom"
   "improve: zombie pathfinding now avoids buildings"
-  "fix: storm damage was not applying on late joiners"
-  "enhance: added kill feed to top-right HUD"
+  "fix: storm damage not applying to late joiners"
+  "enhance: kill feed added to top-right HUD"
 
-## IF SOMETHING BREAKS
-If you are unsure or something seems risky:
-1. Stop
-2. Create a file called NOTES.md in the project root
-3. Write what you were trying to do and why you stopped
-4. Commit NOTES.md only with message "note: stopped — see NOTES.md"
+## IF SOMETHING BREAKS OR FEELS RISKY
+1. Stop immediately
+2. Create NOTES.md explaining what you tried and why you stopped
+3. Commit only NOTES.md with message "note: stopped — see NOTES.md"
+4. Do not attempt to fix it — leave it for human review
 
 ## START OF EVERY SESSION CHECKLIST
-1. Run `git branch` — confirm you are on claude-improvements
-2. Run `git log --oneline -5` — see what was done recently, don't repeat it
-3. Pick ONE improvement that hasn't been done recently
-4. Make the change
-5. Commit with a descriptive message
+1. Run `git branch` — must show * claude-improvements
+2. Run `git log --oneline -10` — see what was done, never repeat it
+3. Read all relevant files before touching anything
+4. Pick ONE improvement matching IMPROVEMENT_FOCUS
+5. Touch as many files as needed to implement it completely
+6. No half-finished code — the feature must work end to end
+7. Check for syntax errors before committing
+8. Commit with descriptive message
+9. Push: git push origin claude-improvements
