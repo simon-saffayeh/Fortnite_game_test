@@ -103,6 +103,14 @@ export const WEAPON_DEFS = {
     spread: 0.007, magSize: 1, reloadTime: 1.9, ammoType: 'medium',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
+  grenadeLauncher: {
+    id: 'grenadeLauncher', name: 'Grenade Launcher',
+    damage: 65, fireRate: 1.0, bulletSpeed: 130, range: 320,
+    spread: 0.006, magSize: 6, reloadTime: 2.6, ammoType: 'rockets',
+    rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
+    explosive: true, explosionRadius: 6, explosionDamage: 65,
+    gravity: -20, maxBounces: 2, fuseTime: 3.5,
+  },
   // ── Unique weapons ───────────────────────────────────────────────────────────
   // Phase Rifle: bullet travels slowly — when it hits anything the player
   // instantly teleports to that location. Fire into a window, teleport inside.
@@ -293,6 +301,23 @@ function _buildGunModelRaw(def, scale = 1) {
     const crystalMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
     const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(0.045), crystalMat);
     crystal.position.set(0, 0.12, -0.15); g.add(crystal);
+
+  } else if (def.id === 'grenadeLauncher') {
+    // Break-action grenade launcher — short fat barrel, folding foregrip, cylinder magazine
+    g.add(box(0.12, 0.14, 0.72, 0x2a3a1a, 0,  0.00, 0.00));          // main body
+    g.add(cyl(0.075, 0.58, 0x1a2a0e, 0, 0.00, -0.20, Math.PI/2));    // fat barrel tube
+    g.add(cyl(0.080, 0.06, 0x3a5020, 0, 0.00, -0.50, Math.PI/2));    // muzzle crown
+    g.add(cyl(0.085, 0.06, def.rarityColor, 0, 0.00, -0.48, Math.PI/2)); // muzzle ring
+    // Rotating cylinder / magazine — 6 chambers
+    g.add(cyl(0.11, 0.14, 0x222a18, 0, 0.00,  0.16, Math.PI/2));     // cylinder
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      g.add(cyl(0.025, 0.16, 0x111111, Math.cos(a)*0.07, 0.00, Math.sin(a)*0.07 + 0.16, Math.PI/2));
+    }
+    g.add(box(0.10, 0.22, 0.13, 0x1a2610, 0, -0.16,  0.34));         // pistol grip
+    g.add(box(0.04, 0.08, 0.14, 0x111111, 0, -0.08,  0.22));         // trigger
+    g.add(box(0.08, 0.06, 0.22, 0x2a3a1a, 0,  0.00, -0.08));         // top rail
+    g.add(cyl(0.03, 0.08, 0x556644, 0, 0.09, 0.06, 0));              // iron sight post
 
   } else if (def.id === 'bombLauncher') {
     g.add(cyl(0.14, 0.75, 0x1a0000, 0, 0, 0, Math.PI/2)); // fat tube
@@ -527,8 +552,9 @@ export const RARITY_POOL = [
   { id: 'huntingRifle',   weight:  4 },
   { id: 'handCannon',     weight:  5 },
   // Legendary
-  { id: 'sniper',         weight:  3 },
-  { id: 'rocketLauncher', weight:  2 },
+  { id: 'sniper',           weight:  3 },
+  { id: 'rocketLauncher',   weight:  2 },
+  { id: 'grenadeLauncher',  weight:  2 },
   // Mythic
   { id: 'minigun',        weight:  0.8},
   { id: 'phaseRifle',     weight:  0.5},
