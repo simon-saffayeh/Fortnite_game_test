@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 
-const BASE_FOV       = 70;
-const SPRINT_FOV     = 80;
-const ADS_FOV        = 42;
-const SNIPER_ADS_FOV = 22;
+const BASE_FOV        = 70;
+const SPRINT_FOV      = 80;
+const ADS_FOV         = 42;
+const HUNTING_ADS_FOV = 34;
+const SNIPER_ADS_FOV  = 22;
 const EYE_HEIGHT        = 1.65;
 const EYE_HEIGHT_CROUCH = 1.05;
 
@@ -21,15 +22,24 @@ export class ThirdPersonCamera {
     this._bobPhase = 0;
     this._bobY     = 0;
 
-    this._leanRoll = 0;
+    this._leanRoll   = 0;
     this._smoothEyeY = null;
+
+    // Scope sway (breathing motion while aiming down a scoped weapon)
+    this._scopeType  = null;   // null | 'hunting' | 'sniper'
+    this._swayPhase  = 0;
 
     // FPS — never show the local player's body
     this.player.body.visible = false;
   }
 
-  setADS(active, isSniper = false) {
-    this._fovTarget = active ? (isSniper ? SNIPER_ADS_FOV : ADS_FOV) : BASE_FOV;
+  // scopeType: null | 'hunting' | 'sniper'
+  setADS(active, scopeType = null) {
+    this._scopeType = active ? scopeType : null;
+    if      (scopeType === 'sniper'  && active) this._fovTarget = SNIPER_ADS_FOV;
+    else if (scopeType === 'hunting' && active) this._fovTarget = HUNTING_ADS_FOV;
+    else if (active)                            this._fovTarget = ADS_FOV;
+    else                                        this._fovTarget = BASE_FOV;
   }
 
   setSprint(active) {
@@ -96,6 +106,21 @@ export class ThirdPersonCamera {
       eyePos.y + sinP * 100,
       eyePos.z - cosY * cosP * 100
     );
+
+    // Scope breathing sway — sinusoidal drift simulating holding a rifle steady.
+    // Crouching cuts amplitude by ~75%.  Two overlapping frequencies give an
+    // organic feel rather than a mechanical pendulum.
+    if (this._scopeType) {
+      this._swayPhase += dt;
+      const isSniper = this._scopeType === 'sniper';
+      const baseAmp  = isSniper ? 0.90 : 0.48;
+      const amp      = this.player.crouching ? baseAmp * 0.25 : baseAmp;
+      lookTarget.y += Math.sin(this._swayPhase * 0.52) * amp
+                    + Math.sin(this._swayPhase * 2.00) * amp * 0.20;
+      lookTarget.x += Math.cos(this._swayPhase * 0.40) * amp * 0.50
+                    + Math.cos(this._swayPhase * 1.55) * amp * 0.14;
+    }
+
     this.camera.lookAt(lookTarget);
 
     // Subtle strafe lean
