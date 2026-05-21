@@ -1089,6 +1089,7 @@ class Game {
       this.deploy = new DeployController(
         this.scene, this.world, this.player, this.camera, this._busPath
       );
+      this.deploy.setParticles(this.particles);
     }
 
     // ── 9. Ready ──────────────────────────────────────────────────────
