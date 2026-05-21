@@ -32,6 +32,9 @@ export class HUD {
     this._staticMap      = this._prerenderStaticMap();
     this._mmTimer        = 0;
     this._lowHealthPulse = 0;
+    this._camera         = null;
+    this._canvas         = null;
+    this._buildDropWaypoints();
   }
 
   // ── Inventory bar (5 slots) ──────────────────────────────────────────────
@@ -365,6 +368,7 @@ export class HUD {
   setNetwork(net)      { this._net           = net; }
   // Held so future features (e.g. minimap drop markers) can read drop state.
   setSupplyDrops(sd)   { this._supplyDrops   = sd; }
+  setCamera(camera, canvas) { this._camera = camera; this._canvas = canvas; }
 
   setEnemiesRemaining(count, total) {
     const el = document.getElementById('er-count');
@@ -393,6 +397,81 @@ export class HUD {
     // Regular ADS keeps the crosshair visible (just tighter via _updateCrosshair).
     if (ch) ch.style.opacity = (active && sniper) ? '0' : '1';
     if (this._scopeEl) this._scopeEl.classList.toggle('active', active && sniper);
+  }
+
+  // ── Supply-drop screen-edge waypoints ────────────────────────────────────
+  _buildDropWaypoints() {
+    this._dropWaypointPool = [];
+    for (let i = 0; i < 4; i++) {
+      const el = document.createElement('div');
+      el.className = 'drop-waypoint';
+      el.innerHTML = '<span class="dw-arrow">▼</span><span class="dw-dist"></span>';
+      el.style.display = 'none';
+      document.getElementById('hud').appendChild(el);
+      this._dropWaypointPool.push(el);
+    }
+  }
+
+  _updateDropWaypoints() {
+    for (const el of this._dropWaypointPool) el.style.display = 'none';
+
+    if (!this._supplyDrops || !this._camera || !this._canvas) return;
+
+    const drops = this._supplyDrops.getDrops();
+    const pp    = this.player.getPosition();
+    const W     = this._canvas.clientWidth  || this._canvas.width;
+    const H     = this._canvas.clientHeight || this._canvas.height;
+    const EDGE  = 44; // px from edge for clamped arrow
+    const cx    = W / 2, cy = H / 2;
+
+    let idx = 0;
+    for (const drop of drops) {
+      if (idx >= this._dropWaypointPool.length) break;
+
+      const dropPos = drop.root ? drop.root.position : null;
+      if (!dropPos) continue;
+
+      // Project world position to NDC via the live camera
+      const cam      = this._camera;
+      const Vec3     = cam.position.constructor; // THREE.Vector3
+      const wp       = new Vec3(dropPos.x, dropPos.y, dropPos.z);
+      wp.project(cam);
+
+      const screenX = ( wp.x * 0.5 + 0.5) * W;
+      const screenY = (-wp.y * 0.5 + 0.5) * H;
+      const behind  = wp.z > 1.0;
+
+      const el   = this._dropWaypointPool[idx++];
+      const dx   = dropPos.x - pp.x;
+      const dz   = dropPos.z - pp.z;
+      const dist = Math.round(Math.sqrt(dx * dx + dz * dz));
+      el.querySelector('.dw-dist').textContent = dist + 'm';
+
+      const onScreen = !behind && screenX >= EDGE && screenX <= W - EDGE
+                                && screenY >= EDGE && screenY <= H - EDGE;
+      if (onScreen) {
+        el.style.left    = Math.round(screenX) + 'px';
+        el.style.top     = Math.round(screenY) + 'px';
+        el.style.display = 'flex';
+        el.querySelector('.dw-arrow').style.transform = 'rotate(180deg)';
+        el.classList.remove('dw-edge');
+      } else {
+        // When behind camera, flip screen coords so the angle still points away
+        const sx = behind ? W - screenX : screenX;
+        const sy = behind ? H - screenY : screenY;
+        const angle = Math.atan2(sy - cy, sx - cx);
+        const cos   = Math.cos(angle), sin = Math.sin(angle);
+        const scaleX = cos !== 0 ? ((cos > 0 ? W - EDGE : EDGE) - cx) / cos : Infinity;
+        const scaleY = sin !== 0 ? ((sin > 0 ? H - EDGE : EDGE) - cy) / sin : Infinity;
+        const scale  = Math.min(Math.abs(scaleX), Math.abs(scaleY));
+
+        el.style.left    = Math.round(cx + cos * scale) + 'px';
+        el.style.top     = Math.round(cy + sin * scale) + 'px';
+        el.style.display = 'flex';
+        el.querySelector('.dw-arrow').style.transform = `rotate(${(angle + Math.PI / 2).toFixed(4)}rad)`;
+        el.classList.add('dw-edge');
+      }
+    }
   }
 
   // ── Static minimap (full-res heightmap, 256×256) ─────────────────────────
@@ -440,6 +519,7 @@ export class HUD {
     this._updateStorm();
     this._updatePickupPrompt();
     this._updateCrosshair();
+    this._updateDropWaypoints();
 
     this._mmTimer += dt;
     if (this._mmTimer >= 0.1) {
@@ -599,6 +679,27 @@ export class HUD {
         const m = toMM(p.root.position.x, p.root.position.z);
         ctx.fillStyle = p.def.healHp > 0 ? '#22ee66' : '#44aaff';
         ctx.beginPath(); ctx.arc(m.x, m.y, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+    // Supply drop markers (gold diamond)
+    if (this._supplyDrops) {
+      ctx.fillStyle = '#ffd700';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 0.8;
+      for (const drop of this._supplyDrops.getDrops()) {
+        const m = toMM(drop.x, drop.z);
+        const dx = m.x - SIZE / 2, dy = m.y - SIZE / 2;
+        if (dx * dx + dy * dy > (SIZE / 2) * (SIZE / 2)) continue;
+        const r = 4;
+        ctx.beginPath();
+        ctx.moveTo(m.x,     m.y - r);
+        ctx.lineTo(m.x + r, m.y    );
+        ctx.lineTo(m.x,     m.y + r);
+        ctx.lineTo(m.x - r, m.y    );
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
       }
     }
 
