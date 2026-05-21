@@ -8,6 +8,11 @@ const PHASES = [
   { endRadius:  18, waitTime: 10, shrinkTime:  8, dmgPerSec: 5.0 },
 ];
 
+// Wall colour progresses through phases: calm blue → electric purple → danger red
+const PHASE_WALL_COLORS  = [0x3355ff, 0x7722ee, 0xcc1199, 0xff1133];
+const PHASE_GLOW_COLORS  = [0x4477ff, 0x9933ff, 0xff22bb, 0xff3300];
+const PHASE_CAP_COLORS   = [0x1122aa, 0x441188, 0x880055, 0xaa0022];
+
 const START_RADIUS = 340;
 const CENTER       = new THREE.Vector3(18, 0, -12);
 const WALL_HEIGHT  = 350;
@@ -85,10 +90,10 @@ export class Storm {
   }
 
   _buildVisual() {
-    // Normalized radius=1 cylinder, scaled each frame
+    // ── Outer wall cylinder (radius=1, scaled each frame) ──────────────────
     const wallGeo = new THREE.CylinderGeometry(1, 1, WALL_HEIGHT, 80, 1, true);
     this._wall = new THREE.Mesh(wallGeo, new THREE.MeshBasicMaterial({
-      color: 0x3355ff,
+      color: PHASE_WALL_COLORS[0],
       transparent: true,
       opacity: 0.38,
       side: THREE.DoubleSide,
@@ -97,12 +102,50 @@ export class Storm {
     this._wall.position.copy(this.center);
     this.scene.add(this._wall);
 
-    // Storm ceiling disc (dark cloud cap)
+    // ── Inner edge-glow wall (slightly smaller, more opaque) ───────────────
+    // Gives the wall visual depth and a bright crackling edge.
+    const innerGeo = new THREE.CylinderGeometry(0.994, 0.994, WALL_HEIGHT, 80, 1, true);
+    this._innerWall = new THREE.Mesh(innerGeo, new THREE.MeshBasicMaterial({
+      color: PHASE_GLOW_COLORS[0],
+      transparent: true,
+      opacity: 0.18,
+      side: THREE.BackSide,
+      depthWrite: false,
+    }));
+    this._innerWall.position.copy(this.center);
+    this.scene.add(this._innerWall);
+
+    // ── Ground glow ring at the wall base ──────────────────────────────────
+    // A flat torus that pulses to signal the danger boundary clearly.
+    const ringGeo = new THREE.TorusGeometry(1, 0.025, 8, 120);
+    this._groundRing = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: PHASE_GLOW_COLORS[0],
+      transparent: true,
+      opacity: 0.90,
+      depthWrite: false,
+    }));
+    this._groundRing.rotation.x = Math.PI / 2;
+    this._groundRing.position.set(this.center.x, 0.35, this.center.z);
+    this.scene.add(this._groundRing);
+
+    // ── Second wider ground halo ───────────────────────────────────────────
+    const haloGeo = new THREE.TorusGeometry(1, 0.10, 6, 120);
+    this._groundHalo = new THREE.Mesh(haloGeo, new THREE.MeshBasicMaterial({
+      color: PHASE_GLOW_COLORS[0],
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+    }));
+    this._groundHalo.rotation.x = Math.PI / 2;
+    this._groundHalo.position.set(this.center.x, 0.20, this.center.z);
+    this.scene.add(this._groundHalo);
+
+    // ── Storm ceiling disc (dark cloud cap) ────────────────────────────────
     const capGeo = new THREE.CircleGeometry(1, 80);
     this._cap = new THREE.Mesh(capGeo, new THREE.MeshBasicMaterial({
-      color: 0x1122aa,
+      color: PHASE_CAP_COLORS[0],
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.28,
       side: THREE.DoubleSide,
       depthWrite: false,
     }));
@@ -110,16 +153,17 @@ export class Storm {
     this._cap.position.set(this.center.x, WALL_HEIGHT / 2 - 1, this.center.z);
     this.scene.add(this._cap);
 
-    // Storm lightning flashes — random bright lines on the wall
+    // ── Lightning bolts — 18 lines distributed around the wall ────────────
     this._flashes = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 18; i++) {
       const pts = [new THREE.Vector3(0, -20, 0), new THREE.Vector3(2, -60, 1)];
       const geo = new THREE.BufferGeometry().setFromPoints(pts);
       const flash = new THREE.Line(geo, new THREE.LineBasicMaterial({
         color: 0xaaccff, transparent: true, opacity: 0, linewidth: 2,
       }));
       this.scene.add(flash);
-      this._flashes.push({ mesh: flash, timer: 0, interval: 1.5 + Math.random() * 3 });
+      // Stagger initial timers so bolts don't all fire at once
+      this._flashes.push({ mesh: flash, timer: Math.random() * 3, interval: 1.5 + Math.random() * 3 });
     }
   }
 
@@ -185,8 +229,11 @@ export class Storm {
     // ── Visibility: hidden during the pre-storm grace period ──────────────
     const pending = this.phaseState === 'pending';
     const showWall = !pending;
-    this._wall.visible = showWall;
-    this._cap.visible  = showWall;
+    this._wall.visible       = showWall;
+    this._innerWall.visible  = showWall;
+    this._cap.visible        = showWall;
+    this._groundRing.visible = showWall;
+    this._groundHalo.visible = showWall;
     for (const f of this._flashes) f.mesh.visible = showWall;
 
     if (pending) {
@@ -200,13 +247,30 @@ export class Storm {
     // ── Scale meshes ──────────────────────────────────────────────────────
     const r = this.currentRadius;
     this._wall.scale.set(r, 1, r);
+    this._innerWall.scale.set(r, 1, r);
     this._cap.scale.set(r, r, r);
+    this._groundRing.scale.set(r, r, r);
+    this._groundHalo.scale.set(r, r, r);
 
-    // Animate wall pulsing
-    const pulse = 0.30 + Math.sin(Date.now() * 0.0022) * 0.10;
-    this._wall.material.opacity = pulse;
+    // ── Phase-tinted colours ──────────────────────────────────────────────
+    const pi = Math.min(this.phaseIndex, PHASE_WALL_COLORS.length - 1);
+    this._wall.material.color.setHex(PHASE_WALL_COLORS[pi]);
+    this._innerWall.material.color.setHex(PHASE_GLOW_COLORS[pi]);
+    this._groundRing.material.color.setHex(PHASE_GLOW_COLORS[pi]);
+    this._groundHalo.material.color.setHex(PHASE_GLOW_COLORS[pi]);
+    this._cap.material.color.setHex(PHASE_CAP_COLORS[pi]);
 
-    // Lightning flashes
+    // ── Animate wall and ground ring pulsing ──────────────────────────────
+    const t       = Date.now() * 0.001;
+    const pulse   = 0.30 + Math.sin(t * 2.2) * 0.10;
+    const ringPulse = 0.75 + Math.sin(t * 3.1) * 0.22;
+    const haloPulse = 0.20 + Math.sin(t * 1.8 + 1.0) * 0.10;
+    this._wall.material.opacity      = pulse;
+    this._innerWall.material.opacity = 0.12 + Math.sin(t * 4.0) * 0.06;
+    this._groundRing.material.opacity = ringPulse;
+    this._groundHalo.material.opacity = haloPulse;
+
+    // ── Lightning flashes ─────────────────────────────────────────────────
     this._animateFlashes(dt, r);
 
     // ── Player damage ─────────────────────────────────────────────────────
@@ -274,27 +338,42 @@ export class Storm {
   }
 
   _animateFlashes(dt, radius) {
+    // Late phases fire bolts more frequently and in brighter colours
+    const pi          = Math.min(this.phaseIndex, PHASE_GLOW_COLORS.length - 1);
+    const boltColor   = PHASE_GLOW_COLORS[pi];
+    const speedMult   = 1 + pi * 0.5;   // fades faster in later phases
+    const intervalMax = Math.max(0.8, 3.5 - pi * 0.7);
+
     for (const f of this._flashes) {
       f.timer -= dt;
       if (f.timer <= 0) {
-        f.interval = 1.2 + Math.random() * 3.5;
+        f.interval = 0.6 + Math.random() * intervalMax;
         f.timer    = f.interval;
+
         // Reposition on wall surface
         const angle = Math.random() * Math.PI * 2;
         const x = this.center.x + Math.cos(angle) * radius;
         const z = this.center.z + Math.sin(angle) * radius;
-        const yTop = 20 + Math.random() * 60;
-        const yBot = yTop - 30 - Math.random() * 40;
+        const yTop = 15 + Math.random() * 70;
+        const yBot = yTop - 25 - Math.random() * 50;
+        const yMid = (yTop + yBot) / 2;
+
+        // Jagged 4-segment bolt for a more dramatic zigzag look
+        const jag = (s) => (Math.random() - 0.5) * s;
         const pts = [
-          new THREE.Vector3(x, yTop, z),
-          new THREE.Vector3(x + (Math.random() - 0.5) * 4, (yTop + yBot) / 2, z + (Math.random() - 0.5) * 4),
-          new THREE.Vector3(x, yBot, z),
+          new THREE.Vector3(x,            yTop,               z           ),
+          new THREE.Vector3(x + jag(5),   yTop * 0.67 + yBot * 0.33, z + jag(5)),
+          new THREE.Vector3(x + jag(7),   yMid,               z + jag(7) ),
+          new THREE.Vector3(x + jag(4),   yTop * 0.33 + yBot * 0.67, z + jag(4)),
+          new THREE.Vector3(x,            yBot,               z           ),
         ];
         f.mesh.geometry.setFromPoints(pts);
-        f.mesh.material.opacity = 0.9;
+        f.mesh.material.color.setHex(boltColor);
+        f.mesh.material.opacity = 1.0;
       }
-      // Fade flash
-      f.mesh.material.opacity = Math.max(0, f.mesh.material.opacity - dt * 4);
+      // Fade — later phases hold brightness slightly longer before fading
+      const fade = 2.5 + pi * 0.8;
+      f.mesh.material.opacity = Math.max(0, f.mesh.material.opacity - dt * fade * speedMult);
     }
   }
 
