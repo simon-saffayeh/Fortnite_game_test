@@ -178,8 +178,14 @@ export class ProjectileSystem {
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
         } else if (particles) {
+          // Dirt spray in opposite travel direction + dust cloud
+          const impactDir = b.direction.clone().negate();
+          impactDir.y = Math.abs(impactDir.y) + 0.5; // bias upward
+          particles.spawnSparks(b.position.clone(), impactDir, {
+            count: 10, color: 0x886644, speed: 5, lifetime: 0.28, size: 0.09, spread: 0.75,
+          });
           particles.spawnBurst(b.position.clone(), {
-            count: 5, color: 0x998866, speed: 2.5, lifetime: 0.2, size: 0.1,
+            count: 8, color: 0xaa9966, speed: 2.0, lifetime: 0.35, size: 0.14, gravity: 4,
           });
         }
         this._kill(b);
@@ -193,9 +199,11 @@ export class ProjectileSystem {
           if (b.def?.explosive) {
             this._explode(b, b.position.clone(), particles, player, enemyManager);
           } else if (particles) {
-            particles.spawnBurst(b.position.clone(), {
-              count: 6, color: 0xb07838, speed: 3, lifetime: 0.25, size: 0.1,
+            const impactDir = b.direction.clone().negate();
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 8, color: 0xcc9944, speed: 6, lifetime: 0.25, size: 0.08, spread: 0.65,
             });
+            particles.spawnSmoke(b.position.clone(), { count: 3, color: 0x888877, lifetime: 1.0, size: 0.4 });
           }
           this._kill(b);
           continue;
@@ -208,9 +216,12 @@ export class ProjectileSystem {
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
         } else if (particles) {
-          particles.spawnBurst(b.position.clone(), {
-            count: 6, color: 0x998877, speed: 3, lifetime: 0.25, size: 0.1,
+          // Concrete/stone chip sparks + small smoke puff
+          const impactDir = b.direction.clone().negate();
+          particles.spawnSparks(b.position.clone(), impactDir, {
+            count: 9, color: 0xccbbaa, speed: 5.5, lifetime: 0.22, size: 0.07, spread: 0.6,
           });
+          particles.spawnSmoke(b.position.clone(), { count: 3, color: 0x999988, lifetime: 0.9, size: 0.35 });
         }
         this._kill(b);
         continue;
@@ -352,6 +363,9 @@ export class ProjectileSystem {
         particles.spawnBurst(pos.clone(), { count: 40, color: 0xff6600, speed: 12, lifetime: 0.6, size: 0.35 });
         particles.spawnBurst(pos.clone(), { count: 20, color: 0xffdd00, speed: 6,  lifetime: 0.4, size: 0.2  });
         particles.spawnBurst(pos.clone(), { count: 15, color: 0x888888, speed: 5,  lifetime: 0.8, size: 0.15 });
+        // Lingering smoke plume rising from the blast
+        particles.spawnSmoke(pos.clone(), { count: 10, color: 0x555544, speed: 2.5, lifetime: 2.8, size: 0.9 });
+        particles.spawnSmoke(pos.clone(), { count: 6,  color: 0x333322, speed: 1.5, lifetime: 3.5, size: 1.2 });
       }
     }
 
