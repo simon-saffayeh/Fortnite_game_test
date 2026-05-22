@@ -1,18 +1,16 @@
 import * as THREE from 'three';
 
-/**
- * ParticleSystem — lightweight GPU-friendly particle effects.
- * Uses BufferGeometry + Points for performance.
- * Supports: dust, explosion, sparkle, footstep — extensible.
- */
+// Pre-allocated pool of burst emitters — no per-burst geometry/material creation.
+// Each slot stays in the scene permanently (visible=false when idle).
+const POOL_SIZE    = 64;  // max simultaneous bursts before silently dropping
+const MAX_PER_EMIT = 64;  // max particles per burst; excess is clamped
+
 export class ParticleSystem {
   constructor(scene) {
-    this.scene  = scene;
-    this.emitters = [];
+    this.scene = scene;
     this._time = 0;
-
-    // Ambient floating dust particles across the island
     this._buildAmbientDust();
+    this._buildPool();
   }
 
   _buildAmbientDust() {
@@ -20,19 +18,15 @@ export class ParticleSystem {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array(count * 3);
     const colors    = new Float32Array(count * 3);
-    const scales    = new Float32Array(count);
 
     for (let i = 0; i < count; i++) {
       positions[i * 3]     = (Math.random() - 0.5) * 300;
       positions[i * 3 + 1] = Math.random() * 30 + 2;
       positions[i * 3 + 2] = (Math.random() - 0.5) * 300;
 
-      // Soft golden dust colour
       colors[i * 3]     = 0.9 + Math.random() * 0.1;
       colors[i * 3 + 1] = 0.85 + Math.random() * 0.1;
       colors[i * 3 + 2] = 0.6 + Math.random() * 0.2;
-
-      scales[i] = Math.random();
     }
 
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -48,10 +42,9 @@ export class ParticleSystem {
     });
 
     this._dust = new THREE.Points(geo, mat);
-    this._dustPositions = positions;
+    this._dustPositions  = positions;
     this._dustVelocities = new Float32Array(count * 3);
 
-    // Random drift velocities
     for (let i = 0; i < count; i++) {
       this._dustVelocities[i * 3]     = (Math.random() - 0.5) * 0.4;
       this._dustVelocities[i * 3 + 1] = Math.random() * 0.15 + 0.05;
@@ -61,59 +54,80 @@ export class ParticleSystem {
     this.scene.add(this._dust);
   }
 
-  /**
-   * Spawn a burst emitter (explosion, impact, etc.)
-   * @param {THREE.Vector3} pos
-   * @param {object} opts - { count, color, speed, lifetime, size }
-   */
-  _getBurstMaterial(color, size) {
-    if (!this._burstMatCache) this._burstMatCache = new Map();
-    const key = `${color}_${size}`;
-    let mat = this._burstMatCache.get(key);
-    if (!mat) {
-      mat = new THREE.PointsMaterial({
-        size, color, transparent: true, opacity: 1, depthWrite: false,
+  _buildPool() {
+    this._pool = [];
+    for (let i = 0; i < POOL_SIZE; i++) {
+      const positions  = new Float32Array(MAX_PER_EMIT * 3);
+      const velocities = new Float32Array(MAX_PER_EMIT * 3);
+
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geo.setDrawRange(0, 0);
+
+      const mat = new THREE.PointsMaterial({
+        size: 0.4, color: 0xffaa33,
+        transparent: true, opacity: 0,
+        depthWrite: false,
       });
-      this._burstMatCache.set(key, mat);
+
+      const points = new THREE.Points(geo, mat);
+      points.frustumCulled = false;
+      points.visible = false;
+      this.scene.add(points);
+
+      this._pool.push({
+        points, positions, velocities,
+        active: false,
+        age: 0, lifetime: 0, count: 0, gravity: 9,
+      });
     }
-    return mat;
   }
 
+  /**
+   * Spawn a burst from the pool.
+   * @param {THREE.Vector3} pos
+   * @param {object} opts - { count, color, speed, lifetime, size, gravity }
+   *   gravity: acceleration pulling particles down (default 9, negative = push up)
+   */
   spawnBurst(pos, opts = {}) {
-    const count    = opts.count    || 24;
-    const color    = opts.color    || 0xffaa33;
-    const speed    = opts.speed    || 5;
-    const lifetime = opts.lifetime || 0.8;
-    const size     = opts.size     || 0.4;
+    const count    = Math.min(opts.count    ?? 24, MAX_PER_EMIT);
+    const color    = opts.color    ?? 0xffaa33;
+    const speed    = opts.speed    ?? 5;
+    const lifetime = opts.lifetime ?? 0.8;
+    const size     = opts.size     ?? 0.4;
+    const gravity  = opts.gravity  ?? 9;
 
-    const geo = new THREE.BufferGeometry();
-    const positions  = new Float32Array(count * 3);
-    const velocities = [];
-
-    for (let i = 0; i < count; i++) {
-      positions[i * 3]     = pos.x;
-      positions[i * 3 + 1] = pos.y;
-      positions[i * 3 + 2] = pos.z;
-      velocities.push(
-        (Math.random() - 0.5) * speed * 2,
-        Math.random() * speed,
-        (Math.random() - 0.5) * speed * 2
-      );
+    // Find a free pool slot — skip if pool is exhausted
+    let slot = null;
+    for (const s of this._pool) {
+      if (!s.active) { slot = s; break; }
     }
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    if (!slot) return;
 
-    // Clone shared material so per-emitter opacity fade doesn't affect others
-    const mat = this._getBurstMaterial(color, size).clone();
-    const points = new THREE.Points(geo, mat);
-    this.scene.add(points);
+    slot.active   = true;
+    slot.age      = 0;
+    slot.lifetime = lifetime;
+    slot.count    = count;
+    slot.gravity  = gravity;
 
-    this.emitters.push({
-      points,
-      positions,
-      velocities,
-      lifetime,
-      age: 0,
-    });
+    const mat = slot.points.material;
+    mat.color.setHex(color);
+    mat.size    = size;
+    mat.opacity = 1;
+    slot.points.visible = true;
+    slot.points.geometry.setDrawRange(0, count);
+
+    const p = slot.positions;
+    const v = slot.velocities;
+    for (let i = 0; i < count; i++) {
+      p[i*3+0] = pos.x;
+      p[i*3+1] = pos.y;
+      p[i*3+2] = pos.z;
+      v[i*3+0] = (Math.random() - 0.5) * speed * 2;
+      v[i*3+1] = Math.random() * speed;
+      v[i*3+2] = (Math.random() - 0.5) * speed * 2;
+    }
+    slot.points.geometry.attributes.position.needsUpdate = true;
   }
 
   update(dt) {
@@ -122,43 +136,41 @@ export class ParticleSystem {
     // Animate ambient dust
     const dp = this._dustPositions;
     const dv = this._dustVelocities;
-    const count = dp.length / 3;
-    for (let i = 0; i < count; i++) {
-      dp[i * 3]     += dv[i * 3]     * dt;
-      dp[i * 3 + 1] += dv[i * 3 + 1] * dt;
-      dp[i * 3 + 2] += dv[i * 3 + 2] * dt;
-
-      // Wrap around
-      if (dp[i * 3 + 1] > 35) {
-        dp[i * 3]     = (Math.random() - 0.5) * 300;
-        dp[i * 3 + 1] = 2;
-        dp[i * 3 + 2] = (Math.random() - 0.5) * 300;
+    const dc = dp.length / 3;
+    for (let i = 0; i < dc; i++) {
+      dp[i*3]   += dv[i*3]   * dt;
+      dp[i*3+1] += dv[i*3+1] * dt;
+      dp[i*3+2] += dv[i*3+2] * dt;
+      if (dp[i*3+1] > 35) {
+        dp[i*3]   = (Math.random() - 0.5) * 300;
+        dp[i*3+1] = 2;
+        dp[i*3+2] = (Math.random() - 0.5) * 300;
       }
     }
     this._dust.geometry.attributes.position.needsUpdate = true;
 
-    // Update burst emitters
-    for (const em of this.emitters) {
-      em.age += dt;
-      const t = em.age / em.lifetime;
-      em.points.material.opacity = 1 - t;
+    // Update pooled burst emitters
+    for (const slot of this._pool) {
+      if (!slot.active) continue;
+      slot.age += dt;
 
-      const p = em.positions;
-      for (let i = 0; i < p.length / 3; i++) {
-        p[i * 3]     += em.velocities[i * 3]     * dt;
-        p[i * 3 + 1] += (em.velocities[i * 3 + 1] - 9 * em.age) * dt;
-        p[i * 3 + 2] += em.velocities[i * 3 + 2] * dt;
+      slot.points.material.opacity = 1 - slot.age / slot.lifetime;
+
+      const p = slot.positions;
+      const v = slot.velocities;
+      const c = slot.count;
+      const g = slot.gravity;
+      for (let i = 0; i < c; i++) {
+        p[i*3+0] += v[i*3+0] * dt;
+        p[i*3+1] += (v[i*3+1] - g * slot.age) * dt;
+        p[i*3+2] += v[i*3+2] * dt;
       }
-      em.points.geometry.attributes.position.needsUpdate = true;
-    }
+      slot.points.geometry.attributes.position.needsUpdate = true;
 
-    // Remove expired emitters
-    const dead = this.emitters.filter(e => e.age >= e.lifetime);
-    dead.forEach(e => {
-      this.scene.remove(e.points);
-      e.points.geometry.dispose();
-      e.points.material.dispose();
-    });
-    this.emitters = this.emitters.filter(e => e.age < e.lifetime);
+      if (slot.age >= slot.lifetime) {
+        slot.active = false;
+        slot.points.visible = false;
+      }
+    }
   }
 }
