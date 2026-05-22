@@ -85,6 +85,7 @@ export class ParticleSystem {
     const speed    = opts.speed    || 5;
     const lifetime = opts.lifetime || 0.8;
     const size     = opts.size     || 0.4;
+    const gravity  = opts.gravity  ?? 9;  // positive = down, negative = up (fire/smoke)
 
     const geo = new THREE.BufferGeometry();
     const positions  = new Float32Array(count * 3);
@@ -113,6 +114,7 @@ export class ParticleSystem {
       velocities,
       lifetime,
       age: 0,
+      gravity,
     });
   }
 
@@ -146,7 +148,7 @@ export class ParticleSystem {
       const p = em.positions;
       for (let i = 0; i < p.length / 3; i++) {
         p[i * 3]     += em.velocities[i * 3]     * dt;
-        p[i * 3 + 1] += (em.velocities[i * 3 + 1] - 9 * em.age) * dt;
+        p[i * 3 + 1] += (em.velocities[i * 3 + 1] - (em.gravity ?? 9) * em.age) * dt;
         p[i * 3 + 2] += em.velocities[i * 3 + 2] * dt;
       }
       em.points.geometry.attributes.position.needsUpdate = true;

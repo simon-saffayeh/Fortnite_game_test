@@ -62,6 +62,13 @@ export const WEAPON_DEFS = {
     spread: 0.018, magSize: 20, reloadTime: 2.4, ammoType: 'medium',
     rarityColor: 0x0088ff, rarity: 'Rare', auto: true, pellets: 1,
   },
+  flamethrower: {
+    id: 'flamethrower', name: 'Flamethrower',
+    damage: 6, fireRate: 0.07, bulletSpeed: 78, range: 44,
+    spread: 0.17, magSize: 80, reloadTime: 3.0, ammoType: 'rockets',
+    rarityColor: 0xff6600, rarity: 'Rare', auto: true, pellets: 1,
+    flamethrower: true,
+  },
   dualPistols: {
     id: 'dualPistols', name: 'Dual Pistols',
     damage: 30, fireRate: 0.22, bulletSpeed: 270, range: 160,
@@ -265,6 +272,19 @@ function _buildGunModelRaw(def, scale = 1) {
     g.add(box(0.10, 0.20, 0.14, 0x3a2a10, 0, -0.14, 0.28));     // pistol grip
     g.add(box(0.04, 0.07, 0.14, 0x111111, 0, -0.07, 0.14));     // trigger
     g.add(box(0.03, 0.03, 0.22, 0xccaa55, 0, 0.08, -0.16));     // bolt (arrow) on rail
+
+  } else if (def.id === 'flamethrower') {
+    // Flamethrower: cylindrical fuel canister + long barrel + orange nozzle ring
+    g.add(box(0.14, 0.18, 0.62, 0x4a5a2a, 0,     0,     0));          // body frame
+    g.add(cyl(0.09, 0.44, 0x3a4a1e,  0,  0.04,  0.15, Math.PI/2));   // fuel canister
+    g.add(cyl(0.05, 0.62, 0x1e1e1e,  0,  0.04, -0.48, Math.PI/2));   // barrel tube
+    g.add(cyl(0.065,0.05, 0xff6600,  0,  0.04, -0.80, Math.PI/2));   // nozzle glow ring
+    g.add(cyl(0.032,0.10, 0x111111,  0,  0.04, -0.82, Math.PI/2));   // nozzle tip
+    g.add(box(0.12, 0.22, 0.14, 0x4a5a2a, 0, -0.15, 0.20));          // grip
+    g.add(box(0.04, 0.08, 0.13, 0x111111, 0, -0.07, 0.09));          // trigger
+    g.add(box(0.03, 0.03, 0.28, 0x2a2a2a, -0.06, 0.09, -0.14));      // hose from tank to barrel
+    // Rarity-coloured band on canister
+    g.add(cyl(0.092, 0.04, def.rarityColor, 0, 0.04, 0.32, Math.PI/2));
 
   } else if (def.id === 'huntingRifle') {
     // Bolt-action — wood stock, long barrel, no mag (single shot)
@@ -521,6 +541,7 @@ export const RARITY_POOL = [
   // Rare
   { id: 'ar',             weight: 12 },
   { id: 'heavyAR',        weight:  9 },
+  { id: 'flamethrower',   weight:  4 },
   // Epic
   { id: 'shotgun',        weight:  6 },
   { id: 'dualPistols',    weight:  5 },
