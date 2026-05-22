@@ -550,6 +550,50 @@ export function randomWeaponDef(rng = Math.random) {
   return WEAPON_DEFS.pistol;
 }
 
+// ── Loot zone system ─────────────────────────────────────────────────────────
+// Three concentric zones around the island centre. The hot zone near the
+// centre rewards players who push in early — Epic/Legendary/Mythic weapons
+// are dramatically more common there. Outer-edge loot stays Common/Uncommon.
+// This works with seeded RNG (multiplayer) because the zone is a deterministic
+// function of the spawn point's fixed coordinates.
+const _ZONE_CX = 18, _ZONE_CZ = -12; // matches storm CENTER in storm.js
+const _ZONE_WEIGHTS = {
+  //            [outer, mid,  hot]
+  Common:    [1.00, 0.35, 0.08],
+  Uncommon:  [1.00, 0.65, 0.25],
+  Rare:      [1.00, 1.00, 0.75],
+  Epic:      [1.00, 1.80, 3.20],
+  Legendary: [1.00, 2.60, 5.50],
+  Mythic:    [1.00, 1.50, 2.80],
+};
+// Returns 0=outer, 1=mid, 2=hot
+function _weaponZone(x, z) {
+  const d = Math.sqrt((x - _ZONE_CX) ** 2 + (z - _ZONE_CZ) ** 2);
+  return d < 70 ? 2 : d < 150 ? 1 : 0;
+}
+
+// Like randomWeaponDef but biases rarity toward the given world position.
+export function randomWeaponDefZoned(rng, x, z) {
+  const zone = _weaponZone(x, z);
+  if (zone === 0) return randomWeaponDef(rng);
+
+  let total = 0;
+  const adjusted = RARITY_POOL.map(e => {
+    const rarity = WEAPON_DEFS[e.id]?.rarity ?? 'Common';
+    const mult   = (_ZONE_WEIGHTS[rarity] ?? [1, 1, 1])[zone];
+    const w = e.weight * mult;
+    total += w;
+    return { id: e.id, w };
+  });
+
+  let r = rng() * total;
+  for (const entry of adjusted) {
+    r -= entry.w;
+    if (r <= 0) return WEAPON_DEFS[entry.id];
+  }
+  return WEAPON_DEFS.pistol;
+}
+
 /**
  * Mulberry32 PRNG. Deterministic from a 32-bit integer seed. Used by
  * WeaponSystem when a multiplayer match seeds world loot so every client
@@ -678,7 +722,7 @@ export class WeaponSystem {
     for (const s of SPAWN_POINTS) {
       const h = this.world.getTerrainHeight(s.x, s.z);
       if (h < 0.2) continue;
-      const def = randomWeaponDef(this._rng);
+      const def = randomWeaponDefZoned(this._rng, s.x, s.z);
       const y = h + (s.dy ?? 0);
       this.pickups.push(new WeaponPickup(this.scene, def, new THREE.Vector3(s.x, y, s.z)));
       // Ammo pile sits ~1.2m to the side of the gun. 'special' weapons

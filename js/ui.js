@@ -543,6 +543,21 @@ export class HUD {
       }
     }
 
+    // Hot-zone ring — dashed gold circle showing the Epic/Legendary loot area.
+    // Centre matches _ZONE_CX/_ZONE_CZ in weapons.js; radii match zone thresholds.
+    {
+      const hc  = toMM(18, -12);
+      ctx.save();
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = 'rgba(255,210,50,0.42)';
+      ctx.lineWidth   = 1;
+      ctx.beginPath(); ctx.arc(hc.x, hc.y, 70 * mmSc, 0, Math.PI * 2); ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,170,30,0.20)';
+      ctx.beginPath(); ctx.arc(hc.x, hc.y, 150 * mmSc, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
 
     // POI labels (smaller font for minimap)
     if (this.world.pois) {
