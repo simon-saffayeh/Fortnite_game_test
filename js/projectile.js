@@ -43,9 +43,18 @@ class Bullet {
     this.active   = true;
     this._vy      = 0; // vertical velocity for gravity arc
 
-    const isBomb = this.def?.id === 'bombLauncher';
-    this.mat.color.setHex(isBomb ? 0x111111 : (this.faction === 'player' ? 0xffee44 : 0xff5522));
-    this.mesh.scale.setScalar(isBomb ? 5 : 1);
+    const isBomb     = this.def?.id === 'bombLauncher';
+    const isCrossbow = this.def?.id === 'crossbow';
+    this.mat.color.setHex(
+      isBomb     ? 0x111111 :
+      isCrossbow ? 0xbb8833 :
+      (this.faction === 'player' ? 0xffee44 : 0xff5522)
+    );
+    this.mesh.scale.set(
+      isBomb ? 5 : isCrossbow ? 1.8 : 1,
+      isBomb ? 5 : isCrossbow ? 1.8 : 1,
+      isBomb ? 5 : isCrossbow ? 2.8 : 1,
+    );
 
     this.mesh.position.copy(origin);
     this.mesh.quaternion.setFromUnitVectors(_forward, this.direction);
@@ -152,12 +161,11 @@ export class ProjectileSystem {
 
       b.prevPosition.copy(b.position);
 
-      // Gravity arc for bomb launcher
+      // Gravity arc (bomb launcher arcs up, crossbow bolt drops)
       if (b.def?.gravity) {
         b._vy = (b._vy ?? 0) + b.def.gravity * dt;
         b.position.y += b._vy * dt;
-        // Spin the bomb visually
-        b.mesh.rotation.x += dt * 3;
+        if (b.def.id === 'bombLauncher') b.mesh.rotation.x += dt * 3;
       }
 
       b.position.addScaledVector(b.direction, b.speed * dt);
