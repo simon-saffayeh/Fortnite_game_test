@@ -2,10 +2,20 @@ import * as THREE from 'three';
 
 // Each phase: wait N seconds still, then shrink over shrinkTime seconds to endRadius
 const PHASES = [
-  { endRadius: 240, waitTime: 30, shrinkTime: 20, dmgPerSec: 0.6 },
-  { endRadius: 130, waitTime: 20, shrinkTime: 15, dmgPerSec: 1.2 },
-  { endRadius:  60, waitTime: 14, shrinkTime: 12, dmgPerSec: 2.5 },
-  { endRadius:  18, waitTime: 10, shrinkTime:  8, dmgPerSec: 5.0 },
+  { endRadius: 240, waitTime: 45, shrinkTime: 25, dmgPerSec: 0.6  },
+  { endRadius: 130, waitTime: 25, shrinkTime: 18, dmgPerSec: 1.4  },
+  { endRadius:  60, waitTime: 16, shrinkTime: 14, dmgPerSec: 3.0  },
+  { endRadius:  18, waitTime: 12, shrinkTime: 10, dmgPerSec: 6.0  },
+  { endRadius:   5, waitTime:  8, shrinkTime:  8, dmgPerSec: 14.0 }, // final showdown
+];
+
+// Wall + cap colours shift from cold blue → purple → crimson → deep red as the match intensifies
+const _PHASE_COLORS = [
+  { wall: 0x3355ff, cap: 0x1122aa },
+  { wall: 0x5522ee, cap: 0x2211aa },
+  { wall: 0x9922cc, cap: 0x550066 },
+  { wall: 0xdd1166, cap: 0x880033 },
+  { wall: 0xff2200, cap: 0xaa1100 },
 ];
 
 const START_RADIUS = 340;
@@ -202,8 +212,15 @@ export class Storm {
     this._wall.scale.set(r, 1, r);
     this._cap.scale.set(r, r, r);
 
-    // Animate wall pulsing
-    const pulse = 0.30 + Math.sin(Date.now() * 0.0022) * 0.10;
+    // Per-phase colour tint
+    const phaseClamp = Math.min(this.phaseIndex, _PHASE_COLORS.length - 1);
+    this._wall.material.color.setHex(_PHASE_COLORS[phaseClamp].wall);
+    this._cap.material.color.setHex(_PHASE_COLORS[phaseClamp].cap);
+
+    // Animate wall pulsing — later phases pulse more aggressively
+    const pulseSpeed  = 0.0022 + this.phaseIndex * 0.0008;
+    const pulseDepth  = Math.min(0.18, 0.10 + this.phaseIndex * 0.02);
+    const pulse = 0.30 + Math.sin(Date.now() * pulseSpeed) * pulseDepth;
     this._wall.material.opacity = pulse;
 
     // Lightning flashes
