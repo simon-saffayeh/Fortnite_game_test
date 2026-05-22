@@ -103,6 +103,14 @@ export const WEAPON_DEFS = {
     spread: 0.007, magSize: 1, reloadTime: 1.9, ammoType: 'medium',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
+  thunderLance: {
+    id: 'thunderLance', name: 'Thunder Lance',
+    damage: 50, fireRate: 1.2, bulletSpeed: 200, range: 280,
+    spread: 0.005, magSize: 3, reloadTime: 2.6, ammoType: 'rockets',
+    rarityColor: 0xffee00, rarity: 'Legendary', auto: false, pellets: 1,
+    explosive: true, explosionRadius: 5, explosionDamage: 50,
+    chainExplosion: true, chainRadius: 28, chainDamage: 40,
+  },
   // ── Unique weapons ───────────────────────────────────────────────────────────
   // Phase Rifle: bullet travels slowly — when it hits anything the player
   // instantly teleports to that location. Fire into a window, teleport inside.
@@ -351,6 +359,34 @@ function _buildGunModelRaw(def, scale = 1) {
     );
     node.position.set(0, 0.08, -0.18);
     g.add(node);
+
+  } else if (def.id === 'thunderLance') {
+    // Sleek electric weapon — dark charcoal body, glowing coil rings, crackling tip
+    g.add(box(0.08, 0.12, 1.00, 0x1a1a2a, 0, 0, 0));              // main body
+    g.add(box(0.04, 0.04, 0.46, 0x222244, 0, 0.05, -0.73));        // barrel extension
+    // Three glowing coil rings spaced along the barrel
+    const coilMat = new THREE.MeshBasicMaterial({ color: def.rarityColor });
+    for (const oz of [-0.20, -0.44, -0.68]) {
+      const coil = new THREE.Mesh(new THREE.TorusGeometry(0.068, 0.013, 6, 18), coilMat);
+      coil.rotation.x = Math.PI / 2;
+      coil.position.set(0, 0.02, oz);
+      g.add(coil);
+    }
+    // Glowing energy tip at muzzle
+    const tip = new THREE.Mesh(
+      new THREE.SphereGeometry(0.052, 8, 6),
+      new THREE.MeshBasicMaterial({ color: def.rarityColor }),
+    );
+    tip.position.set(0, 0.05, -0.99); g.add(tip);
+    // Grip and trigger
+    g.add(box(0.10, 0.22, 0.14, 0x111122, 0, -0.16, 0.28));
+    g.add(box(0.04, 0.08, 0.14, 0x0a0a1a, 0, -0.08, 0.14));
+    // Power cell on top — small glowing box
+    const cell = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, 0.05, 0.16),
+      new THREE.MeshBasicMaterial({ color: def.rarityColor, transparent: true, opacity: 0.82 }),
+    );
+    cell.position.set(0, 0.10, 0.05); g.add(cell);
   }
 
   g.scale.setScalar(scale);
@@ -529,6 +565,7 @@ export const RARITY_POOL = [
   // Legendary
   { id: 'sniper',         weight:  3 },
   { id: 'rocketLauncher', weight:  2 },
+  { id: 'thunderLance',   weight:  2 },
   // Mythic
   { id: 'minigun',        weight:  0.8},
   { id: 'phaseRifle',     weight:  0.5},

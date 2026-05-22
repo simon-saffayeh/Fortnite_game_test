@@ -1263,14 +1263,21 @@ class Game {
     if (this.net) this.net.sendShoot(origin, camDir, weapon.def.id);
 
     const muzzlePos = origin.clone().addScaledVector(camDir, 1.2);
-    this.muzzle.flash(muzzlePos, 3.5);
-    this.particles.spawnBurst(muzzlePos, { count: 4, color: 0xffcc44, speed: 2.5, lifetime: 0.08, size: 0.1 });
-
-    const shakeAmt  = weapon.def.id === 'sniper' ? 0.18 : weapon.def.id === 'shotgun' ? 0.14 : 0.06;
-    const recoilAmt = weapon.def.id === 'sniper' ? 0.045 : weapon.def.id === 'shotgun' ? 0.030
-                    : weapon.def.id === 'ar'     ? 0.010 : 0.018;
-    this.shake.shake(shakeAmt);
-    this.camera3P.addRecoil(recoilAmt);
+    if (weapon.def.id === 'thunderLance') {
+      // Electric arc discharge — yellow + blue-white spark burst
+      this.particles.spawnBurst(muzzlePos, { count: 8, color: 0xffee00, speed: 5, lifetime: 0.14, size: 0.13 });
+      this.particles.spawnBurst(muzzlePos, { count: 5, color: 0xaaddff, speed: 7, lifetime: 0.11, size: 0.08 });
+      this.shake.shake(0.09);
+      this.camera3P.addRecoil(0.022);
+    } else {
+      this.muzzle.flash(muzzlePos, 3.5);
+      this.particles.spawnBurst(muzzlePos, { count: 4, color: 0xffcc44, speed: 2.5, lifetime: 0.08, size: 0.1 });
+      const shakeAmt  = weapon.def.id === 'sniper' ? 0.18 : weapon.def.id === 'shotgun' ? 0.14 : 0.06;
+      const recoilAmt = weapon.def.id === 'sniper' ? 0.045 : weapon.def.id === 'shotgun' ? 0.030
+                      : weapon.def.id === 'ar'     ? 0.010 : 0.018;
+      this.shake.shake(shakeAmt);
+      this.camera3P.addRecoil(recoilAmt);
+    }
   }
 
   // ── ADS ───────────────────────────────────────────────────────────────────
