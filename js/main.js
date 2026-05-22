@@ -474,6 +474,7 @@ class Game {
       && net?.inGameIds && !net.inGameIds.has(net.myId));
     this.supplyDrops    = null;
     this._eHeld         = false;
+    this._stormPrevKey  = null;   // tracks last seen phase_state for announcements
     this.canvas = document.getElementById('game-canvas');
     this.clock  = new THREE.Clock();
     this.running = false;
@@ -1273,6 +1274,45 @@ class Game {
     this.camera3P.addRecoil(recoilAmt);
   }
 
+  // ── Storm phase announcements ─────────────────────────────────────────────
+  _checkStormAnnouncement() {
+    if (!this.storm || !this.hud) return;
+    const info  = this.storm.getInfo();
+    const key   = `${info.phase}_${info.state}`;
+    const prev  = this._stormPrevKey;
+    this._stormPrevKey = key;
+    if (!prev || key === prev) return;   // first call or no change
+
+    // Storm colors by phase (1-indexed)
+    const phaseColors = ['', '#4477ff', '#9933ff', '#ff22bb', '#ff3300'];
+    const color = phaseColors[Math.min(info.phase, phaseColors.length - 1)];
+
+    if (info.state === 'pending') return;
+
+    if (prev.endsWith('_pending') && info.state === 'waiting') {
+      // Bus just landed everyone — first safe period begins
+      this.hud.showStormAnnouncement(
+        'STORM INCOMING',
+        `Zone 1 closes in ${Math.ceil(info.timeLeft)}s`,
+        '#4477ff',
+      );
+    } else if (info.state === 'shrinking') {
+      this.hud.showStormAnnouncement(
+        `ZONE ${info.phase} CLOSING`,
+        'Move to the safe zone!',
+        color,
+      );
+    } else if (info.state === 'waiting' && info.phase > 1) {
+      this.hud.showStormAnnouncement(
+        `ZONE ${info.phase}`,
+        `Next close in ${Math.ceil(info.timeLeft)}s`,
+        color,
+      );
+    } else if (info.state === 'done') {
+      this.hud.showStormAnnouncement('FINAL ZONE', 'The circle will not shrink further', '#ff3300');
+    }
+  }
+
   // ── ADS ───────────────────────────────────────────────────────────────────
   _updateADS() {
     const ads    = this.player.adsActive && !!this.inventory.getActive();
@@ -2068,7 +2108,7 @@ class Game {
             this.zombieWaves.state === 'intermission' ? 'block' : 'none';
         }
       }
-      if (this.storm) this.storm.update(dt, this.player);
+      if (this.storm) { this.storm.update(dt, this.player); this._checkStormAnnouncement(); }
       // Sun shadow camera tracks the player so the tight ortho frustum
       // stays useful far from world origin. Cheap — just a few writes.
       const pp = this.player.getPosition();

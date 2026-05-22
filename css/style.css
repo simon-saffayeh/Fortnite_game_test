@@ -227,6 +227,40 @@ body {
   100% { transform: translate(-50%, -52%) scale(1.0); opacity: 0; }
 }
 
+/* ── Storm phase announcement banner ───────────────────────────────────── */
+#storm-announcement {
+  position: absolute; bottom: 22%; left: 50%;
+  transform: translateX(-50%) translateY(0);
+  background: linear-gradient(135deg, rgba(0,0,0,0.88) 0%, rgba(10,5,30,0.88) 100%);
+  border: 1px solid color-mix(in srgb, var(--sa-color, #7777ff) 60%, transparent);
+  border-radius: 4px;
+  padding: 10px 36px 8px;
+  text-align: center; white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 0 28px color-mix(in srgb, var(--sa-color, #7777ff) 35%, transparent);
+  opacity: 0;
+  /* hidden by default — the .show class drives the keyframe */
+}
+#storm-announcement.show {
+  animation: stormAnn 3.8s cubic-bezier(0.18, 0.88, 0.28, 1) forwards;
+}
+@keyframes stormAnn {
+  0%   { transform: translateX(-50%) translateY(20px); opacity: 0; }
+  10%  { transform: translateX(-50%) translateY(0);    opacity: 1; }
+  72%  { transform: translateX(-50%) translateY(0);    opacity: 1; }
+  100% { transform: translateX(-50%) translateY(-12px); opacity: 0; }
+}
+.sa-main {
+  font-size: 26px; font-weight: 900; letter-spacing: 5px;
+  text-transform: uppercase;
+  text-shadow: 0 0 16px currentColor, 0 2px 8px rgba(0,0,0,0.9);
+}
+.sa-sub {
+  font-size: 12px; font-weight: 500; letter-spacing: 2px;
+  color: rgba(220,220,255,0.75);
+  margin-top: 3px; text-transform: uppercase;
+}
+
 /* ── Death / Victory screens ────────────────────────────────────────────── */
 #death-screen, #victory-screen {
   position: fixed; inset: 0; z-index: 200;
