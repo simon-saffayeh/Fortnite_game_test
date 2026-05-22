@@ -700,6 +700,7 @@ class Game {
     } else if (this.mode === 'zombie') {
       this.enemies     = null;
       this.zombieWaves = new ZombieWaveManager(this.scene, this.world, this.projectiles);
+      this.zombieWaves.setParticles(this.particles);
     } else {
       this.enemies     = null;
       this.zombieWaves = null;
@@ -926,7 +927,21 @@ class Game {
 
       this.zombieWaves.onKill = (e) => {
         this._killCount++;
-        this.hud.addKill('Zombie', { headshot: !!e._killedByHeadshot });
+        const killName = e._variant === 'rager'   ? 'Rager'
+                       : e._variant === 'bloater' ? 'Bloater'
+                       : 'Zombie';
+        this.hud.addKill(killName, { headshot: !!e._killedByHeadshot });
+        // Bloaters explode on death: acid burst + proximity damage
+        if (e.bloaterAoE) {
+          const bp = e.root.position.clone();
+          this.particles.spawnBurst(bp, { count: 22, color: 0x44ff44, speed: 5, lifetime: 0.6, size: 0.22 });
+          this.particles.spawnBurst(bp, { count: 10, color: 0x88ff22, speed: 3, lifetime: 0.45, size: 0.32 });
+          const pp = this.player.getPosition();
+          const d  = Math.sqrt((pp.x - bp.x) ** 2 + (pp.z - bp.z) ** 2);
+          if (d < 4.5) {
+            this.player.takeDamage(Math.round(28 * (1 - d / 4.5)), false, bp, 'a bloater explosion');
+          }
+        }
         if (Math.random() < 0.5) this.pickups.spawnLoot(e.root.position);
         const alive = this.zombieWaves.aliveCount;
         this.hud.setEnemiesRemaining(alive, waveCount_hud(this.zombieWaves.wave));
