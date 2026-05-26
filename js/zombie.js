@@ -233,14 +233,29 @@ export class Zombie {
       this._wanderT = 1.5 + Math.random() * 3;
     }
     const sp = SHAMBLE_SPEED * 0.3;
-    this.root.position.x += Math.sin(this._wanderDir) * sp * dt;
-    this.root.position.z += Math.cos(this._wanderDir) * sp * dt;
+    const nx = Math.sin(this._wanderDir);
+    const nz = Math.cos(this._wanderDir);
+    const nextX = this.root.position.x + nx * sp * dt;
+    const nextZ = this.root.position.z + nz * sp * dt;
+    // Turn away when wander path leads into a building
+    if (this._inBuilding(nextX, nextZ)) {
+      this._wanderDir += Math.PI * 0.5 + (Math.random() - 0.5) * 1.2;
+      this._wanderT = 1.0 + Math.random() * 1.5;
+    } else {
+      this.root.position.x = nextX;
+      this.root.position.z = nextZ;
+    }
     this.root.rotation.y = this._wanderDir;
     return true;
   }
 
   _doChase(dt, dx, dz, dist) {
-    const nx = dx / dist, nz = dz / dist;
+    let nx = dx / dist, nz = dz / dist;
+
+    // Steer around building walls before committing to direction
+    const steered = this._steerAroundWalls(nx, nz);
+    nx = steered.x; nz = steered.z;
+
     this.root.rotation.y = Math.atan2(nx, nz);
 
     // Occasionally lunge — a sudden burst of speed that closes distance fast
@@ -254,6 +269,41 @@ export class Zombie {
     this.root.position.x += nx * speed * dt;
     this.root.position.z += nz * speed * dt;
     return true;
+  }
+
+  // Returns true if world position (x, z) overlaps any static building box.
+  // Margin 0.5 keeps zombies from hugging walls too tightly.
+  _inBuilding(x, z) {
+    for (const b of this.world.staticCollider._boxes) {
+      if (Math.abs(x - b.cx) <= b.hw + 0.5 && Math.abs(z - b.cz) <= b.hd + 0.5) return true;
+    }
+    return false;
+  }
+
+  // Given desired direction (nx, nz), return a steered direction that avoids
+  // the nearest building wall. Checks a look-ahead feeler; if blocked, tries
+  // rotating in increasing steps until a clear heading is found.
+  _steerAroundWalls(nx, nz) {
+    const FEELER = 3.2;
+    const px = this.root.position.x;
+    const pz = this.root.position.z;
+
+    if (!this._inBuilding(px + nx * FEELER, pz + nz * FEELER)) {
+      return { x: nx, z: nz }; // direct path is clear
+    }
+
+    // Try rotating ±30°, ±60°, ±90°, ±120° until a clear heading is found
+    const steps = [Math.PI/6, -Math.PI/6, Math.PI/3, -Math.PI/3,
+                   Math.PI/2, -Math.PI/2, Math.PI*2/3, -Math.PI*2/3];
+    for (const a of steps) {
+      const cos = Math.cos(a), sin = Math.sin(a);
+      const sx = nx * cos - nz * sin;
+      const sz = nx * sin + nz * cos;
+      if (!this._inBuilding(px + sx * FEELER, pz + sz * FEELER)) {
+        return { x: sx, z: sz };
+      }
+    }
+    return { x: -nx, z: -nz }; // fully blocked — back off
   }
 
   _doAttack(dt, dx, dz, dist, player) {
