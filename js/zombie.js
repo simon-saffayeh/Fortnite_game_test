@@ -26,14 +26,30 @@ const ALERT_FLASH_DUR = 0.40;  // seconds of orange flash on remote-alert
 
 const Z_STATE = { WANDER: 0, CHASE: 1, ATTACK: 2, DEAD: 3 };
 
+// Skin / clothing palettes per variant
+const PAL = {
+  normal: { SKIN: 0x6f7d59, SKIN_D: 0x55613f, SHIRT: 0x39362c, PANTS: 0x2a2620, BONE: 0xd9d2bd, BLOOD: 0x5a1212 },
+  rager:  { SKIN: 0x8a2020, SKIN_D: 0x6a0808, SHIRT: 0x5a0000, PANTS: 0x2a0808, BONE: 0xd9d2bd, BLOOD: 0xcc2222 },
+  bloater:{ SKIN: 0x4a7a2a, SKIN_D: 0x2a5010, SHIRT: 0x1a3a10, PANTS: 0x122208, BONE: 0xc8d2a0, BLOOD: 0x2a6a18 },
+};
+// HP bar colour gradient [high, mid, low] per variant
+const HP_COLS = {
+  normal: [0x7ac11f, 0xc9a01a, 0xb02020],
+  rager:  [0xff3322, 0xcc1100, 0x660000],
+  bloater:[0x55ee22, 0x88cc00, 0x224400],
+};
+
 export class Zombie {
-  constructor(scene, world, position) {
+  // variant: null / 'rager' / 'bloater'
+  constructor(scene, world, position, variant = null) {
     this.scene     = scene;
     this.world     = world;
     this.health    = 80;
     this.maxHealth = 80;
     this.dead      = false;
     this.state     = Z_STATE.WANDER;
+    this._variant  = variant;
+    this.bloaterAoE = false; // set true in _die(); read by ZombieWaveManager.onKill
 
     this._dmgMult   = 1;
     this._spdMult   = 1;
@@ -45,12 +61,18 @@ export class Zombie {
     this._attackT      = 0;         // cooldown timer
     this._swing        = 0;         // claw-swing animation progress (0 idle)
     this._lungeT       = 0;         // remaining lunge-burst time
-    this._lungeCD      = 1.5 + Math.random() * 2;
+    // Ragers lunge twice as often
+    this._lungeCD      = variant === 'rager'
+      ? 0.8  + Math.random() * 1.2
+      : 1.5  + Math.random() * 2.0;
     this._justAggroed  = false;     // set this frame when transitioning WANDER→CHASE
     this._alertFlash   = 0;         // orange flash timer for remote-aggro alert
-    // Per-zombie silhouette variation
-    this._scale     = 0.9 + Math.random() * 0.28;
-    this._lean      = 0.18 + Math.random() * 0.16;
+    // Silhouette variation — bloaters are wide, ragers are lean
+    this._scale = variant === 'bloater' ? 1.00 + Math.random() * 0.22
+                : variant === 'rager'   ? 0.80 + Math.random() * 0.14
+                :                         0.90 + Math.random() * 0.28;
+    this._lean  = variant === 'rager'   ? 0.28 + Math.random() * 0.12
+                :                         0.18 + Math.random() * 0.16;
 
     this._buildModel(position);
     this._buildHealthBar();
@@ -60,7 +82,12 @@ export class Zombie {
   _buildModel(pos) {
     this.root = new THREE.Group();
     this.root.position.copy(pos);
-    this.root.scale.setScalar(this._scale);
+    // Bloaters are wider in XZ but same height; ragers/normals uniform scale
+    if (this._variant === 'bloater') {
+      this.root.scale.set(this._scale * 1.38, this._scale, this._scale * 1.38);
+    } else {
+      this.root.scale.setScalar(this._scale);
+    }
     this.scene.add(this.root);
 
     const lm = hex => new THREE.MeshLambertMaterial({ color: hex });
@@ -72,12 +99,7 @@ export class Zombie {
       return mesh;
     };
 
-    const SKIN   = 0x6f7d59;  // sickly grey-green flesh
-    const SKIN_D = 0x55613f;  // darker flesh
-    const SHIRT  = 0x39362c;  // torn, filthy shirt
-    const PANTS  = 0x2a2620;  // ragged trousers
-    const BONE   = 0xd9d2bd;  // exposed bone
-    const BLOOD  = 0x5a1212;  // dried blood
+    const { SKIN, SKIN_D, SHIRT, PANTS, BONE, BLOOD } = PAL[this._variant ?? 'normal'];
 
     // ── Upper body leans forward (hunched) — wrap torso+head+arms in a lean group
     this._upper = new THREE.Group();
@@ -155,9 +177,10 @@ export class Zombie {
     );
     this._hpGroup.add(bg);
 
+    const hpInitColor = HP_COLS[this._variant ?? 'normal'][0];
     this._hpFill = new THREE.Mesh(
       new THREE.PlaneGeometry(1.5, 0.18),
-      new THREE.MeshBasicMaterial({ color: 0x7ac11f, side: THREE.DoubleSide, depthTest: false })
+      new THREE.MeshBasicMaterial({ color: hpInitColor, side: THREE.DoubleSide, depthTest: false })
     );
     this._hpFill.position.z = 0.005;
     this._hpGroup.add(this._hpFill);
@@ -176,9 +199,10 @@ export class Zombie {
     const pct = Math.max(0, this.health / this.maxHealth);
     this._hpFill.scale.x = pct;
     this._hpFill.position.x = -(1 - pct) * 0.75;
+    const [hi, mid, lo] = HP_COLS[this._variant ?? 'normal'];
     let c;
-    if (pct > 0.5) c = new THREE.Color(0x7ac11f).lerp(new THREE.Color(0xc9a01a), (1 - pct) * 2);
-    else           c = new THREE.Color(0xc9a01a).lerp(new THREE.Color(0xb02020), (0.5 - pct) * 2);
+    if (pct > 0.5) c = new THREE.Color(hi).lerp(new THREE.Color(mid), (1 - pct) * 2);
+    else           c = new THREE.Color(mid).lerp(new THREE.Color(lo), (0.5 - pct) * 2);
     this._hpFill.material.color.copy(c);
     if (camera) this._hpGroup.lookAt(camera.position);
   }
@@ -403,6 +427,7 @@ export class Zombie {
   _die() {
     this.dead = true;
     this._hpGroup.visible = false;
+    if (this._variant === 'bloater') this.bloaterAoE = true;
     if (this.onDeath) this.onDeath(this);
   }
 }
@@ -414,6 +439,7 @@ export class ZombieWaveManager {
     this.world       = world;
     this.projectiles = projectiles;
     this.enemies     = [];
+    this._particles  = null; // set via setParticles() by Game
 
     this.wave        = 0;
     this.state       = 'intermission'; // 'fighting' | 'intermission' | 'complete'
@@ -427,6 +453,8 @@ export class ZombieWaveManager {
     this.onIntermissionTick   = null; // (secsLeft, waveNum) => void
   }
 
+  setParticles(ps) { this._particles = ps; }
+
   get aliveCount() { return this.enemies.filter(e => !e.dead).length; }
 
   _spawnWave(w) {
@@ -434,8 +462,13 @@ export class ZombieWaveManager {
     const hp       = waveHP(w);
     const dmgMult  = waveDmgMult(w);
     const spdMult  = waveSpeed(w);
-    const S        = this.world.size * 0.38;  // safe spawn radius bound
+    const S        = this.world.size * 0.38;
     const baseR    = 55 + w * 4;
+
+    // Variant probability ramps up with wave number.
+    // Ragers appear from wave 4; bloaters from wave 6.
+    const ragerChance   = Math.min(0.40, Math.max(0, (w - 3) * 0.09));
+    const bloaterChance = Math.min(0.28, Math.max(0, (w - 5) * 0.07));
 
     let spawned = 0, attempts = 0;
     while (spawned < count && attempts < count * 8) {
@@ -448,11 +481,24 @@ export class ZombieWaveManager {
       const h = this.world.getTerrainHeight(x, z);
       if (h < 0.8) continue;
 
-      const e = new Zombie(this.scene, this.world, new THREE.Vector3(x, h + FOOT_OFFSET, z));
-      e.health    = hp;
-      e.maxHealth = hp;
-      e._dmgMult  = dmgMult;
-      e._spdMult  = spdMult;
+      // Roll variant
+      const roll = Math.random();
+      const variant = roll < bloaterChance        ? 'bloater'
+                    : roll < bloaterChance + ragerChance ? 'rager'
+                    : null;
+
+      const e = new Zombie(this.scene, this.world, new THREE.Vector3(x, h + FOOT_OFFSET, z), variant);
+      // Stats scaled by variant: rager = fast/fragile; bloater = slow/tanky
+      e.health    = variant === 'rager'   ? Math.round(hp * 0.55)
+                  : variant === 'bloater' ? Math.round(hp * 2.20)
+                  : hp;
+      e.maxHealth = e.health;
+      e._dmgMult  = variant === 'rager'   ? dmgMult * 0.80
+                  : variant === 'bloater' ? dmgMult * 1.40
+                  : dmgMult;
+      e._spdMult  = variant === 'rager'   ? spdMult * 1.70
+                  : variant === 'bloater' ? spdMult * 0.55
+                  : spdMult;
       e.onDeath   = (enemy) => { if (this.onKill) this.onKill(enemy); };
       this.enemies.push(e);
       spawned++;
