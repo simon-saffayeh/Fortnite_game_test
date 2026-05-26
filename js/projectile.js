@@ -43,8 +43,9 @@ class Bullet {
     this.active   = true;
     this._vy      = 0; // vertical velocity for gravity arc
 
-    const isBomb  = this.def?.id === 'bombLauncher';
-    const isFlame = this.def?.id === 'flamethrower';
+    const isBomb    = this.def?.id === 'bombLauncher';
+    const isFlame   = this.def?.id === 'flamethrower';
+    const isGrenade = this.def?.id === 'grenadeLauncher';
     if (isBomb) {
       this.mat.color.setHex(0x111111);
       this.mesh.scale.setScalar(5);
@@ -52,10 +53,16 @@ class Bullet {
       // Fat glowing fireball — orange blob at short range
       this.mat.color.setHex(0xff5500);
       this.mesh.scale.set(3.2, 3.2, 1.4);
+    } else if (isGrenade) {
+      this.mat.color.setHex(0x4a6622);
+      this.mesh.scale.setScalar(3.5);
     } else {
       this.mat.color.setHex(this.faction === 'player' ? 0xffee44 : 0xff5522);
       this.mesh.scale.setScalar(1);
     }
+
+    this._bounces   = 0;
+    this._fuseTimer = 0;
 
     this.mesh.position.copy(origin);
     this.mesh.quaternion.setFromUnitVectors(_forward, this.direction);
@@ -162,12 +169,21 @@ export class ProjectileSystem {
 
       b.prevPosition.copy(b.position);
 
-      // Gravity arc for bomb launcher
+      // Gravity arc + fuse timer for arcing explosives
       if (b.def?.gravity) {
         b._vy = (b._vy ?? 0) + b.def.gravity * dt;
         b.position.y += b._vy * dt;
-        // Spin the bomb visually
         b.mesh.rotation.x += dt * 3;
+
+        // Fuse: explode after fuseTime regardless of surface contact
+        if (b.def.fuseTime) {
+          b._fuseTimer = (b._fuseTimer ?? 0) + dt;
+          if (b._fuseTimer >= b.def.fuseTime) {
+            this._explode(b, b.position.clone(), particles, player, enemyManager);
+            this._kill(b);
+            continue;
+          }
+        }
       }
 
       b.position.addScaledVector(b.direction, b.speed * dt);
@@ -184,6 +200,18 @@ export class ProjectileSystem {
       // Terrain collision
       const groundY = this.world.getTerrainHeight(b.position.x, b.position.z);
       if (b.position.y < groundY) {
+        // Bouncing grenades: reflect vertical velocity and skip detonation
+        if (b.def?.maxBounces != null && b._bounces < b.def.maxBounces && b._vy < 0) {
+          b._bounces++;
+          b._vy = -b._vy * 0.42;           // dampen and reflect
+          b.position.y = groundY + 0.05;   // push just above ground
+          if (particles) {
+            particles.spawnBurst(b.position.clone(), {
+              count: 4, color: 0x667744, speed: 1.5, lifetime: 0.15, size: 0.07,
+            });
+          }
+          continue;
+        }
         if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
