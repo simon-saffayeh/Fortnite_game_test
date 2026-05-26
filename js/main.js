@@ -807,6 +807,7 @@ class Game {
     this.hud.setWeaponSystem(this.weapons);
     this.hud.setPickupManager(this.pickups);
     if (this.supplyDrops) this.hud.setSupplyDrops(this.supplyDrops);
+    this.hud.setCamera(this.camera, this.canvas);
     this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
 
     // Drop a slot → spawn a world pickup at the player's feet (forward

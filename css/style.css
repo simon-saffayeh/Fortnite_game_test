@@ -942,3 +942,39 @@ body {
 .diff-btn[data-diff="medium"].active { background: #f59e0b; color: #000; border-color: #f59e0b; box-shadow: 0 0 14px rgba(245,158,11,0.45); }
 .diff-btn[data-diff="hard"].active   { background: #ef4444; color: #000; border-color: #ef4444; box-shadow: 0 0 14px rgba(239,68,68,0.45); }
 .diff-btn[data-diff="expert"].active { background: #a855f7; color: #fff; border-color: #a855f7; box-shadow: 0 0 14px rgba(168,85,247,0.55); }
+
+/* ── Supply-drop screen-edge waypoints ─────────────────────────────────── */
+.drop-waypoint {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 120;
+  filter: drop-shadow(0 0 4px rgba(0,0,0,0.8));
+}
+.drop-waypoint .dw-arrow {
+  font-size: 18px;
+  color: #ffd700;
+  line-height: 1;
+  transition: transform 0.1s linear;
+}
+.drop-waypoint .dw-dist {
+  font-size: 10px;
+  font-weight: 800;
+  color: #ffd700;
+  letter-spacing: 0.5px;
+  text-shadow: 0 0 6px rgba(0,0,0,0.9);
+  white-space: nowrap;
+}
+/* Edge-clamped variant: slightly larger and with a pulsing glow */
+.drop-waypoint.dw-edge .dw-arrow {
+  font-size: 22px;
+  animation: dw-pulse 1.2s ease-in-out infinite;
+}
+@keyframes dw-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
