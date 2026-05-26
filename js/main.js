@@ -1280,6 +1280,12 @@ class Game {
       this.particles.spawnBurst(muzzlePos, { count: 5, color: 0x999999, speed: 1.2, lifetime: 0.22, size: 0.09 });
       this.shake.shake(0.015);
       this.camera3P.addRecoil(0.006);
+    } else if (weapon.def.id === 'thunderLance') {
+      // Electric arc discharge — yellow + blue-white spark burst
+      this.particles.spawnBurst(muzzlePos, { count: 8, color: 0xffee00, speed: 5, lifetime: 0.14, size: 0.13 });
+      this.particles.spawnBurst(muzzlePos, { count: 5, color: 0xaaddff, speed: 7, lifetime: 0.11, size: 0.08 });
+      this.shake.shake(0.09);
+      this.camera3P.addRecoil(0.022);
     } else {
       this.muzzle.flash(muzzlePos, 3.5);
       this.particles.spawnBurst(muzzlePos, { count: 4, color: 0xffcc44, speed: 2.5, lifetime: 0.08, size: 0.1 });
