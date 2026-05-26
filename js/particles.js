@@ -130,6 +130,70 @@ export class ParticleSystem {
     slot.points.geometry.attributes.position.needsUpdate = true;
   }
 
+  /**
+   * Directional spark spray — particles biased along `dir`. Delegates to the
+   * pooled spawnBurst with a directional velocity override so we don't have
+   * to allocate a second pool just for sparks.
+   */
+  spawnSparks(pos, dir, opts = {}) {
+    // Bake the direction into the burst speed/spread by offsetting the spawn
+    // slightly forward and using a higher upward bias.
+    const count    = Math.min(opts.count    ?? 12, MAX_PER_EMIT);
+    const color    = opts.color    ?? 0xffcc55;
+    const speed    = opts.speed    ?? 9;
+    const lifetime = opts.lifetime ?? 0.38;
+    const size     = opts.size     ?? 0.07;
+
+    let slot = null;
+    for (const s of this._pool) {
+      if (!s.active) { slot = s; break; }
+    }
+    if (!slot) return;
+
+    slot.active   = true;
+    slot.age      = 0;
+    slot.lifetime = lifetime;
+    slot.count    = count;
+    slot.gravity  = 14;
+
+    const mat = slot.points.material;
+    mat.color.setHex(color);
+    mat.size    = size;
+    mat.opacity = 1;
+    slot.points.visible = true;
+    slot.points.geometry.setDrawRange(0, count);
+
+    const d = dir.clone().normalize();
+    const p = slot.positions;
+    const v = slot.velocities;
+    for (let i = 0; i < count; i++) {
+      p[i*3+0] = pos.x;
+      p[i*3+1] = pos.y;
+      p[i*3+2] = pos.z;
+      // Forward-biased velocity with lateral jitter
+      const spd = speed * (0.4 + Math.random() * 0.8);
+      v[i*3+0] = d.x * spd + (Math.random() - 0.5) * speed * 0.5;
+      v[i*3+1] = d.y * spd + Math.random() * speed * 0.3 + 1.5;
+      v[i*3+2] = d.z * spd + (Math.random() - 0.5) * speed * 0.5;
+    }
+    slot.points.geometry.attributes.position.needsUpdate = true;
+  }
+
+  /**
+   * Slow-rising smoke puff. Delegates to spawnBurst with low speed +
+   * negative gravity so the cloud drifts upward instead of falling.
+   */
+  spawnSmoke(pos, opts = {}) {
+    this.spawnBurst(pos, {
+      count:    opts.count    ?? 7,
+      color:    opts.color    ?? 0x777777,
+      speed:    opts.speed    ?? 1.5,
+      lifetime: opts.lifetime ?? 2.0,
+      size:     opts.size     ?? 0.6,
+      gravity:  -1,
+    });
+  }
+
   update(dt) {
     this._time += dt;
 

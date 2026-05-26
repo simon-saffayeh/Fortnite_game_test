@@ -229,11 +229,9 @@ export class ProjectileSystem {
             // Dirt spray in opposite travel direction + dust cloud
             const impactDir = b.direction.clone().negate();
             impactDir.y = Math.abs(impactDir.y) + 0.5; // bias upward
-            if (particles.spawnSparks) {
-              particles.spawnSparks(b.position.clone(), impactDir, {
-                count: 10, color: 0x886644, speed: 5, lifetime: 0.28, size: 0.09, spread: 0.75,
-              });
-            }
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 10, color: 0x886644, speed: 5, lifetime: 0.28, size: 0.09,
+            });
             particles.spawnBurst(b.position.clone(), {
               count: 8, color: 0xaa9966, speed: 2.0, lifetime: 0.35, size: 0.14, gravity: 4,
             });
@@ -406,21 +404,13 @@ export class ProjectileSystem {
     const radius = def.explosionRadius ?? 8;
     const dmg    = def.explosionDamage ?? 80;
 
-    // Thunder Lance uses electric arc particles instead of fire
-    const isThunder = def.id === 'thunderLance';
     if (particles) {
-      if (isThunder) {
-        particles.spawnBurst(pos.clone(), { count: 50, color: 0xffee00, speed: 14, lifetime: 0.5, size: 0.25 });
-        particles.spawnBurst(pos.clone(), { count: 30, color: 0xaaddff, speed: 8,  lifetime: 0.3, size: 0.15 });
-        particles.spawnBurst(pos.clone(), { count: 20, color: 0xffffff, speed: 18, lifetime: 0.2, size: 0.1  });
-      } else {
-        particles.spawnBurst(pos.clone(), { count: 40, color: 0xff6600, speed: 12, lifetime: 0.6, size: 0.35 });
-        particles.spawnBurst(pos.clone(), { count: 20, color: 0xffdd00, speed: 6,  lifetime: 0.4, size: 0.2  });
-        particles.spawnBurst(pos.clone(), { count: 15, color: 0x888888, speed: 5,  lifetime: 0.8, size: 0.15 });
-        // Lingering smoke plume rising from the blast
-        particles.spawnSmoke(pos.clone(), { count: 10, color: 0x555544, speed: 2.5, lifetime: 2.8, size: 0.9 });
-        particles.spawnSmoke(pos.clone(), { count: 6,  color: 0x333322, speed: 1.5, lifetime: 3.5, size: 1.2 });
-      }
+      particles.spawnBurst(pos.clone(), { count: 40, color: 0xff6600, speed: 12, lifetime: 0.6, size: 0.35 });
+      particles.spawnBurst(pos.clone(), { count: 20, color: 0xffdd00, speed: 6,  lifetime: 0.4, size: 0.2  });
+      particles.spawnBurst(pos.clone(), { count: 15, color: 0x888888, speed: 5,  lifetime: 0.8, size: 0.15 });
+      // Lingering smoke plume
+      particles.spawnSmoke(pos.clone(), { count: 10, color: 0x555544, speed: 2.5, lifetime: 2.8, size: 0.9 });
+      particles.spawnSmoke(pos.clone(), { count: 6,  color: 0x333322, speed: 1.5, lifetime: 3.5, size: 1.2 });
     }
 
     const pp = player.getPosition();
@@ -456,21 +446,6 @@ export class ProjectileSystem {
         }
       }
 
-      // Thunder Lance: chain lightning — deal full chainDamage to every other enemy
-      // within chainRadius regardless of falloff (no damage sharing, each gets full hit)
-      if (def.chainExplosion && def.chainRadius && def.chainDamage) {
-        for (const e of enemyManager.enemies) {
-          if (e.dead || !e.root) continue;
-          const ex = e.root.position;
-          const cd = Math.sqrt((ex.x-pos.x)**2 + (ex.y+1-pos.y)**2 + (ex.z-pos.z)**2);
-          if (cd >= radius && cd < def.chainRadius) {
-            const wasDead = e.dead;
-            e.takeDamage(def.chainDamage);
-            if (particles) particles.spawnBurst(ex.clone(), { count: 20, color: 0xffee00, speed: 6, lifetime: 0.3, size: 0.15 });
-            if (this.onEnemyHit) this.onEnemyHit(ex.clone(), def.chainDamage, e, !wasDead && e.dead);
-          }
-        }
-      }
     }
   }
 
