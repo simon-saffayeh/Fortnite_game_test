@@ -43,9 +43,19 @@ class Bullet {
     this.active   = true;
     this._vy      = 0; // vertical velocity for gravity arc
 
-    const isBomb = this.def?.id === 'bombLauncher';
-    this.mat.color.setHex(isBomb ? 0x111111 : (this.faction === 'player' ? 0xffee44 : 0xff5522));
-    this.mesh.scale.setScalar(isBomb ? 5 : 1);
+    const isBomb  = this.def?.id === 'bombLauncher';
+    const isFlame = this.def?.id === 'flamethrower';
+    if (isBomb) {
+      this.mat.color.setHex(0x111111);
+      this.mesh.scale.setScalar(5);
+    } else if (isFlame) {
+      // Fat glowing fireball — orange blob at short range
+      this.mat.color.setHex(0xff5500);
+      this.mesh.scale.set(3.2, 3.2, 1.4);
+    } else {
+      this.mat.color.setHex(this.faction === 'player' ? 0xffee44 : 0xff5522);
+      this.mesh.scale.setScalar(1);
+    }
 
     this.mesh.position.copy(origin);
     this.mesh.quaternion.setFromUnitVectors(_forward, this.direction);
