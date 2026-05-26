@@ -28,6 +28,7 @@ export class HUD {
     this._buildPickupMessage();
     this._buildHealBar();
     this._buildStreakBanner();
+    this._buildStormAnnouncement();
 
     this._staticMap      = this._prerenderStaticMap();
     this._mmTimer        = 0;
@@ -335,6 +336,40 @@ export class HUD {
     this._streakBannerTimer = setTimeout(() => {
       el.style.opacity = '0';
     }, 1600);
+  }
+
+  // ── Storm phase announcement banner ──────────────────────────────────────
+  _buildStormAnnouncement() {
+    const el = document.createElement('div');
+    el.id = 'storm-announcement';
+    const main = document.createElement('div');
+    main.className = 'sa-main';
+    const sub  = document.createElement('div');
+    sub.className  = 'sa-sub';
+    el.append(main, sub);
+    document.getElementById('hud').appendChild(el);
+    this._stormAnnEl   = el;
+    this._stormAnnMain = main;
+    this._stormAnnSub  = sub;
+  }
+
+  /**
+   * @param {string} mainText  Large headline (e.g. "ZONE 2 CLOSING")
+   * @param {string} [subText] Smaller detail line
+   * @param {string} [color]   CSS colour for headline and border glow
+   */
+  showStormAnnouncement(mainText, subText = '', color = '#7777ff') {
+    const el = this._stormAnnEl;
+    if (!el) return;
+    this._stormAnnMain.textContent = mainText;
+    this._stormAnnMain.style.color = color;
+    this._stormAnnSub.textContent  = subText;
+    el.style.setProperty('--sa-color', color);
+    el.classList.remove('show');
+    void el.offsetWidth;   // force reflow so animation restarts
+    el.classList.add('show');
+    clearTimeout(this._stormAnnTimer);
+    this._stormAnnTimer = setTimeout(() => el.classList.remove('show'), 3800);
   }
 
   // ── Damage overlay (red flash) ────────────────────────────────────────────
