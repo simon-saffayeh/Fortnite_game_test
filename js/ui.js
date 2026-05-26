@@ -208,6 +208,29 @@ export class HUD {
     const vLine = document.createElement('div'); vLine.className = 'scope-v';
     const dot   = document.createElement('div'); dot.className   = 'scope-dot';
 
+    // Mil-dot reticle — 3 dot-pairs on each axis for range estimation
+    const MIL_SPACING = 7.0; // vmin per mil step
+    for (let m = 1; m <= 3; m++) {
+      for (const dir of [-1, 1]) {
+        const mh = document.createElement('div');
+        mh.className = 'scope-mil scope-mil-h';
+        mh.style.left = `calc(50% + ${dir * m * MIL_SPACING}vmin)`;
+        this._scopeEl.appendChild(mh);
+
+        const mv = document.createElement('div');
+        mv.className = 'scope-mil scope-mil-v';
+        mv.style.top = `calc(50% + ${dir * m * MIL_SPACING}vmin)`;
+        this._scopeEl.appendChild(mv);
+      }
+    }
+    // Range tick-marks on the vertical axis (longer ticks at ±1 mil)
+    for (const dir of [-1, 1]) {
+      const tick = document.createElement('div');
+      tick.className = 'scope-range-tick';
+      tick.style.top = `calc(50% + ${dir * MIL_SPACING}vmin)`;
+      this._scopeEl.appendChild(tick);
+    }
+
     this._scopeEl.append(lens, hLine, vLine, dot);
     document.body.appendChild(this._scopeEl);
   }

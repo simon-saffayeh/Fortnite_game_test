@@ -448,24 +448,42 @@ body {
   top: 50%; left: 50%;
   transform: translate(-50%, -50%);
   border-radius: 50%;
-  border: 2px solid rgba(180,180,180,0.55);
-  /* This box-shadow fills the area outside the circle with darkness */
-  box-shadow: 0 0 0 100vmax rgba(0,0,0,0.87), inset 0 0 30px rgba(0,0,0,0.3);
+  border: 2px solid rgba(160,190,160,0.65);
+  background: radial-gradient(circle, rgba(0,18,0,0.10) 0%, transparent 72%);
+  /* Box-shadow fills outside the lens with near-black */
+  box-shadow: 0 0 0 100vmax rgba(0,0,0,0.90), inset 0 0 40px rgba(0,0,0,0.35);
 }
 .scope-h {
   position: absolute; top: 50%; left: 0; right: 0;
-  height: 1px; background: rgba(200,200,200,0.6);
+  height: 1px; background: rgba(195,210,195,0.65);
   transform: translateY(-50%);
 }
 .scope-v {
   position: absolute; left: 50%; top: 0; bottom: 0;
-  width: 1px; background: rgba(200,200,200,0.6);
+  width: 1px; background: rgba(195,210,195,0.65);
   transform: translateX(-50%);
 }
 .scope-dot {
-  position: absolute; width: 5px; height: 5px;
-  background: rgba(200,200,200,0.85); border-radius: 50%;
+  position: absolute; width: 4px; height: 4px;
+  background: rgba(210,225,210,0.90); border-radius: 50%;
   top: 50%; left: 50%; transform: translate(-50%, -50%);
+}
+/* Mil-dot reticle marks */
+.scope-mil {
+  position: absolute;
+  width: 5px; height: 5px;
+  background: rgba(195,215,195,0.80);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+.scope-mil-h { top: 50%; }
+.scope-mil-v { left: 50%; }
+/* Wider horizontal tick at ±1 mil for range reference */
+.scope-range-tick {
+  position: absolute; left: 50%;
+  width: 10px; height: 1px;
+  background: rgba(195,215,195,0.55);
+  transform: translate(-50%, -50%);
 }
 
 /* ── Pickup message toast ───────────────────────────────────────────────── */

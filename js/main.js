@@ -1338,12 +1338,15 @@ class Game {
 
   // ── ADS ───────────────────────────────────────────────────────────────────
   _updateADS() {
-    const ads    = this.player.adsActive && !!this.inventory.getActive();
-    const sniper = ads && this.inventory.getActive()?.def.id === 'sniper';
-    this.camera3P.setADS(ads, sniper);
+    const weapDef   = this.inventory.getActive()?.def;
+    const ads       = this.player.adsActive && !!weapDef;
+    const scopeType = ads ? (weapDef?.hasScope ?? null) : null;
+    this.camera3P.setADS(ads, scopeType);
     this.camera3P.setSprint(this.player._isSprinting && !ads);
-    this.hud.setADS(ads, sniper);
-    this.player._scopeMultiplier = sniper ? 0.25 : ads ? 0.50 : 1.0;
+    this.hud.setADS(ads, !!scopeType);
+    this.player._scopeMultiplier = scopeType === 'sniper'  ? 0.25
+                                 : scopeType === 'hunting' ? 0.35
+                                 : ads ? 0.50 : 1.0;
   }
 
   // ── End screens ───────────────────────────────────────────────────────────
