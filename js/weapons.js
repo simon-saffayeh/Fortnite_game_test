@@ -102,6 +102,13 @@ export const WEAPON_DEFS = {
     damage: 98, fireRate: 1.1, bulletSpeed: 210, range: 290,
     spread: 0.004, magSize: 1, reloadTime: 1.4, ammoType: 'heavy',
     rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
+    silent: true, gravity: 22,
+  },
+  silencedSMG: {
+    id: 'silencedSMG', name: 'Silenced SMG',
+    damage: 15, fireRate: 0.08, bulletSpeed: 330, range: 115,
+    spread: 0.040, magSize: 25, reloadTime: 1.7, ammoType: 'light',
+    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: true, pellets: 1,
     silent: true,
   },
   huntingRifle: {
@@ -299,6 +306,19 @@ function _buildGunModelRaw(def, scale = 1) {
     g.add(box(0.03, 0.03, 0.28, 0x2a2a2a, -0.06, 0.09, -0.14));      // hose from tank to barrel
     // Rarity-coloured band on canister
     g.add(cyl(0.092, 0.04, def.rarityColor, 0, 0.04, 0.32, Math.PI/2));
+
+  } else if (def.id === 'silencedSMG') {
+    // SMG body identical to regular SMG, plus a long suppressor tube on the barrel
+    g.add(box(0.11, 0.15, 0.60, 0x2d4a1e, 0, 0, 0));            // body
+    g.add(box(0.05, 0.05, 0.24, 0x111111, 0, 0.04, -0.40));     // barrel
+    g.add(box(0.09, 0.10, 0.18, 0x1e3418, 0, -0.02, 0.32));     // folded stock
+    g.add(box(0.08, 0.24, 0.10, def.rarityColor, 0, -0.18, 0.08)); // magazine
+    g.add(box(0.09, 0.17, 0.11, 0x222222, 0, -0.14, 0.26));     // grip
+    g.add(box(0.04, 0.07, 0.13, 0x111111, 0, -0.08, 0.12));     // trigger guard
+    g.add(box(0.05, 0.03, 0.36, 0x444444, 0, 0.09, 0.02));      // top rail
+    // Suppressor — long dark cylinder capping the barrel
+    g.add(cyl(0.038, 0.40, 0x222222, 0, 0.04, -0.68, Math.PI / 2));
+    g.add(cyl(0.042, 0.04, 0x333333, 0, 0.04, -0.88, Math.PI / 2)); // end cap
 
   } else if (def.id === 'huntingRifle') {
     // Bolt-action — wood stock, long barrel, no mag (single shot)
@@ -587,6 +607,7 @@ export const RARITY_POOL = [
   // Uncommon
   { id: 'smg',            weight: 18 },
   { id: 'crossbow',       weight: 10 },
+  { id: 'silencedSMG',   weight:  8 },
   // Rare
   { id: 'ar',             weight: 12 },
   { id: 'heavyAR',        weight:  9 },

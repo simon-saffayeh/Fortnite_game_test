@@ -1263,29 +1263,31 @@ class Game {
       spawnProtractorBlast(this.scene, this.world, this.particles, origin, camDir);
     }
 
-    // Local gunshot audio — one shot per bullet (semi- and full-auto alike)
-    this.audio?.playLocal(weapon.def.id);
+    // Local gunshot audio — suppressed weapons skip this entirely
+    if (!weapon.def.silent) this.audio?.playLocal(weapon.def.id);
 
     // Broadcast shot to other players
     if (this.net) this.net.sendShoot(origin, camDir, weapon.def.id);
 
     const muzzlePos = origin.clone().addScaledVector(camDir, 1.2);
     if (weapon.def.flamethrower) {
-      // Fire stream: orange tongue of flame, no muzzle flash, barely any shake
+      // Fire stream: orange tongue of flame, no muzzle flash, no recoil
       this.particles.spawnBurst(muzzlePos, { count: 6, color: 0xff5500, speed: 5, lifetime: 0.32, size: 0.22, gravity: -1 });
       this.particles.spawnBurst(muzzlePos, { count: 3, color: 0xffaa00, speed: 3, lifetime: 0.22, size: 0.14, gravity: -1 });
+    } else if (weapon.def.silent) {
+      // Suppressed: faint smoke puff, no flash, minimal camera disturbance
+      this.particles.spawnBurst(muzzlePos, { count: 5, color: 0x999999, speed: 1.2, lifetime: 0.22, size: 0.09 });
+      this.shake.shake(0.015);
+      this.camera3P.addRecoil(0.006);
     } else {
       this.muzzle.flash(muzzlePos, 3.5);
       this.particles.spawnBurst(muzzlePos, { count: 4, color: 0xffcc44, speed: 2.5, lifetime: 0.08, size: 0.1 });
+      const shakeAmt  = weapon.def.id === 'sniper' ? 0.18 : weapon.def.id === 'shotgun' ? 0.14 : 0.06;
+      const recoilAmt = weapon.def.id === 'sniper' ? 0.045 : weapon.def.id === 'shotgun' ? 0.030
+                      : weapon.def.id === 'ar'     ? 0.010 : 0.018;
+      this.shake.shake(shakeAmt);
+      this.camera3P.addRecoil(recoilAmt);
     }
-
-    const shakeAmt  = weapon.def.flamethrower ? 0.0
-                    : weapon.def.id === 'sniper'  ? 0.18 : weapon.def.id === 'shotgun' ? 0.14 : 0.06;
-    const recoilAmt = weapon.def.flamethrower ? 0.0
-                    : weapon.def.id === 'sniper'  ? 0.045 : weapon.def.id === 'shotgun' ? 0.030
-                    : weapon.def.id === 'ar'      ? 0.010 : 0.018;
-    this.shake.shake(shakeAmt);
-    this.camera3P.addRecoil(recoilAmt);
   }
 
   // ── Storm phase announcements ─────────────────────────────────────────────

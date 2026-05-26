@@ -43,9 +43,10 @@ class Bullet {
     this.active   = true;
     this._vy      = 0; // vertical velocity for gravity arc
 
-    const isBomb    = this.def?.id === 'bombLauncher';
-    const isFlame   = this.def?.id === 'flamethrower';
-    const isGrenade = this.def?.id === 'grenadeLauncher';
+    const isBomb     = this.def?.id === 'bombLauncher';
+    const isFlame    = this.def?.id === 'flamethrower';
+    const isGrenade  = this.def?.id === 'grenadeLauncher';
+    const isCrossbow = this.def?.id === 'crossbow';
     if (isBomb) {
       this.mat.color.setHex(0x111111);
       this.mesh.scale.setScalar(5);
@@ -56,6 +57,10 @@ class Bullet {
     } else if (isGrenade) {
       this.mat.color.setHex(0x4a6622);
       this.mesh.scale.setScalar(3.5);
+    } else if (isCrossbow) {
+      // Wooden arrow — brown, elongated
+      this.mat.color.setHex(0xbb8833);
+      this.mesh.scale.set(1.8, 1.8, 2.8);
     } else {
       this.mat.color.setHex(this.faction === 'player' ? 0xffee44 : 0xff5522);
       this.mesh.scale.setScalar(1);
@@ -169,11 +174,13 @@ export class ProjectileSystem {
 
       b.prevPosition.copy(b.position);
 
-      // Gravity arc + fuse timer for arcing explosives
+      // Gravity arc (bomb launcher arcs up, crossbow bolt + grenade drop)
       if (b.def?.gravity) {
         b._vy = (b._vy ?? 0) + b.def.gravity * dt;
         b.position.y += b._vy * dt;
-        b.mesh.rotation.x += dt * 3;
+        if (b.def.id === 'bombLauncher' || b.def.id === 'grenadeLauncher') {
+          b.mesh.rotation.x += dt * 3;
+        }
 
         // Fuse: explode after fuseTime regardless of surface contact
         if (b.def.fuseTime) {
