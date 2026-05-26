@@ -187,7 +187,14 @@ export class DeployController {
     this.camera.fov = BUS_FOV;
     this.camera.updateProjectionMatrix();
 
+    // ── Particles ────────────────────────────────────────────────────────
+    this._particles    = null;
+    this._cloudY       = 90;    // absolute world-Y of the cloud layer
+    this._cloudCrossed = false;
+    this._cloudFlash   = 0;
+
     // ── Meshes ────────────────────────────────────────────────────────────
+    this._buildCloud();
     this._buildBus();
     this._buildParachute();
     this._streaks = new WindStreaks(scene);
@@ -213,6 +220,8 @@ export class DeployController {
 
   // ── Public ──────────────────────────────────────────────────────────────
   getPhaseInt() { return this.phase; }
+
+  setParticles(ps) { this._particles = ps; }
 
   /**
    * Bus flight endpoints in world space, used by the map overlay to draw the
@@ -256,6 +265,26 @@ export class DeployController {
       ? Math.min(1, -this._vel.y / SD_TERMINAL)
       : (this.phase === DEPLOY_PHASE.CHUTE ? 0.18 : 0);
     this._streaks.update(dt, this.player, this._vel, intensity);
+
+    // Speed-tinted streaks: white at slow fall, icy-blue at terminal velocity
+    if (this.phase === DEPLOY_PHASE.SKYDIVE) {
+      const spd = Math.min(1, -this._vel.y / SD_TERMINAL);
+      this._streaks._mat.color.setRGB(
+        THREE.MathUtils.lerp(1, 0.55, spd),
+        THREE.MathUtils.lerp(1, 0.85, spd),
+        1.0
+      );
+    } else {
+      this._streaks._mat.color.setRGB(1, 1, 1);
+    }
+
+    // Cloud flash — fade opacity back to resting value
+    if (this._cloudFlash > 0) {
+      this._cloudFlash = Math.max(0, this._cloudFlash - dt * 1.8);
+      if (this._cloud) this._cloud.material.opacity = 0.22 + this._cloudFlash * 0.55;
+    } else if (this._cloud) {
+      this._cloud.material.opacity = 0.22;
+    }
 
     // Keep the networked yaw meaningful for remote viewers
     this.player.yaw = this._camYaw;
@@ -356,6 +385,17 @@ export class DeployController {
     const groundY  = this.world.getTerrainHeight(pos.x, pos.z);
     const altitude = pos.y - groundY;
 
+    // Cloud layer crossing — burst of white particles + brief white-out flash
+    if (!this._cloudCrossed && pos.y < this._cloudY) {
+      this._cloudCrossed = true;
+      this._cloudFlash   = 0.6;
+      if (this._particles) {
+        const cp = pos.clone();
+        cp.y = this._cloudY;
+        this._particles.spawnBurst(cp, { count: 30, color: 0xddeeff, speed: 5, lifetime: 0.65, size: 0.55, gravity: 0 });
+      }
+    }
+
     // Deploy logic (skydive only)
     if (!chute) {
       const space = !!this.player._keys['Space'];
@@ -377,12 +417,33 @@ export class DeployController {
     this.phase = DEPLOY_PHASE.CHUTE;
     this._chute.visible = true;
     this._vel.y = Math.max(this._vel.y, -PC_TERMINAL);  // soften the snap
+
+    // Chute deploy puff — white burst simulating canopy inflation
+    if (this._particles) {
+      const pos = this.player.root.position.clone();
+      pos.y += 2.5;
+      this._particles.spawnBurst(pos, { count: 20, color: 0xffffff, speed: 4.5, lifetime: 0.7, size: 0.38, gravity: 1 });
+    }
   }
 
   // ── Hand control back to normal gameplay ────────────────────────────────
   _finish() {
     this.active = false;
     this.phase  = DEPLOY_PHASE.DONE;
+
+    // Landing dust kick-up
+    if (this._particles) {
+      const pos = this.player.root.position.clone();
+      this._particles.spawnBurst(pos, { count: 35, color: 0x996633, speed: 5.5, lifetime: 1.0, size: 0.28, gravity: 9 });
+    }
+
+    // Remove cloud layer
+    if (this._cloud) {
+      this.scene.remove(this._cloud);
+      this._cloud.geometry.dispose();
+      this._cloud.material.dispose();
+      this._cloud = null;
+    }
 
     this._chute.visible = false;
     if (this._chute.parent) this._chute.parent.remove(this._chute);
@@ -492,17 +553,38 @@ export class DeployController {
   // ── HUD banner text ─────────────────────────────────────────────────────
   _updateBanner() {
     if (this.phase === DEPLOY_PHASE.BUS) {
+      this._banner.style.color = '';
       this._banner.textContent = 'Press  [SPACE]  to jump';
     } else if (this.phase === DEPLOY_PHASE.SKYDIVE) {
       const pos = this.player.root.position;
       const alt = Math.max(0, Math.round(pos.y - this.world.getTerrainHeight(pos.x, pos.z)));
+      // Green = safe altitude; yellow = approaching auto-deploy; red = imminent
+      const col = alt <= AUTO_DEPLOY_H       ? '#ff4444'
+                : alt <= AUTO_DEPLOY_H + 28  ? '#ffcc44'
+                                             : '#ffffff';
+      this._banner.style.color = col;
       this._banner.textContent = `Press  [SPACE]  to deploy glider  ·  Altitude ${alt}m`;
     } else {
+      this._banner.style.color = '';
       this._banner.textContent = 'Steer with  [W A S D]';
     }
   }
 
   // ── Mesh builders ───────────────────────────────────────────────────────
+  _buildCloud() {
+    const geo = new THREE.CircleGeometry(220, 48);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xd4e8f5, transparent: true, opacity: 0.22,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x    = -Math.PI / 2;
+    mesh.position.y    = this._cloudY;
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    this._cloud = mesh;
+  }
+
   _buildBus() {
     const bus = new THREE.Group();
     const lm  = hex => new THREE.MeshLambertMaterial({ color: hex });
