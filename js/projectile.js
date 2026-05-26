@@ -216,9 +216,11 @@ export class ProjectileSystem {
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
         } else if (particles) {
-          particles.spawnBurst(b.position.clone(), {
-            count: 5, color: 0x998866, speed: 2.5, lifetime: 0.2, size: 0.1,
-          });
+          if (b.def?.flamethrower) {
+            particles.spawnBurst(b.position.clone(), { count: 5, color: 0xff5500, speed: 3, lifetime: 0.4, size: 0.18, gravity: -2 });
+          } else {
+            particles.spawnBurst(b.position.clone(), { count: 5, color: 0x998866, speed: 2.5, lifetime: 0.2, size: 0.1 });
+          }
         }
         this._kill(b);
         continue;
@@ -335,7 +337,10 @@ export class ProjectileSystem {
           const wasDead = enemy.dead;
           enemy.takeDamage(finalDmg);
           if (particles) {
-            if (headshot) {
+            if (b.def?.flamethrower) {
+              // Flame lick: tight upward orange burst
+              particles.spawnBurst(b.position.clone(), { count: 7, color: 0xff5500, speed: 4, lifetime: 0.45, size: 0.20, gravity: -3 });
+            } else if (headshot) {
               particles.spawnBurst(b.position.clone(), { count: 20, color: 0xffdd00, speed: 6, lifetime: 0.35, size: 0.18 });
               particles.spawnBurst(b.position.clone(), { count: 10, color: 0xff4400, speed: 9, lifetime: 0.25, size: 0.12 });
             } else {
