@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 
 const DEFS = {
-  medkit:    { id: 'medkit',    label: 'Med Kit',    healHp: 50,  healShield: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true, useTime: 3.0 },
-  bigmed:    { id: 'bigmed',    label: 'Big Med',    healHp: 100, healShield: 0,  color: 0x00ff88, scale: 1.2,  isConsumable: true, useTime: 5.0 },
-  shield:    { id: 'shield',    label: 'Shield Sip', healHp: 0,   healShield: 25, color: 0x44aaff, scale: 0.8,  isConsumable: true, useTime: 2.0 },
-  bigshield: { id: 'bigshield', label: 'Big Shield', healHp: 0,   healShield: 50, color: 0x2266ff, scale: 1.15, isConsumable: true, useTime: 4.0 },
-  // Unique: heals HP and shield simultaneously in one fast injection
-  stimpack:  { id: 'stimpack',  label: 'Stim Pack',  healHp: 30,  healShield: 30, color: 0xff6600, scale: 0.85, isConsumable: true, useTime: 1.5 },
+  medkit:      { id: 'medkit',      label: 'Med Kit',      healHp: 50,  healShield: 0,  healArmour: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true, useTime: 3.0 },
+  bigmed:      { id: 'bigmed',      label: 'Big Med',      healHp: 100, healShield: 0,  healArmour: 0,  color: 0x00ff88, scale: 1.2,  isConsumable: true, useTime: 5.0 },
+  shield:      { id: 'shield',      label: 'Shield Sip',   healHp: 0,   healShield: 25, healArmour: 0,  color: 0x44aaff, scale: 0.8,  isConsumable: true, useTime: 2.0 },
+  bigshield:   { id: 'bigshield',   label: 'Big Shield',   healHp: 0,   healShield: 50, healArmour: 0,  color: 0x2266ff, scale: 1.15, isConsumable: true, useTime: 4.0 },
+  stimpack:    { id: 'stimpack',    label: 'Stim Pack',    healHp: 30,  healShield: 30, healArmour: 0,  color: 0xff6600, scale: 0.85, isConsumable: true, useTime: 1.5 },
+  armourplate: { id: 'armourplate', label: 'Armour Plate', healHp: 0,   healShield: 0,  healArmour: 25, color: 0xffaa33, scale: 0.9,  isConsumable: true, useTime: 1.2 },
 };
 
 export { DEFS as CONSUMABLE_DEFS };
@@ -62,6 +62,35 @@ class HealthPickup {
       const lid = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.06 * s, 0.52 * s), lm(0xcc2222));
       lid.position.y = 0.19 * s;
       this.root.add(lid);
+    } else if (def.healArmour > 0) {
+      // Armour plate: octagonal metal disc with gold ring and bolt
+      const s = def.scale;
+      const disc = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.30 * s, 0.30 * s, 0.07 * s, 8),
+        new THREE.MeshLambertMaterial({ color: 0x8b6914 })
+      );
+      disc.castShadow = true;
+      this.root.add(disc);
+      const face = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.28 * s, 0.28 * s, 0.02 * s, 8),
+        new THREE.MeshLambertMaterial({ color: 0xd4a017 })
+      );
+      face.position.y = 0.045 * s;
+      this.root.add(face);
+      const ring = new THREE.Mesh(
+        new THREE.TorusGeometry(0.20 * s, 0.028 * s, 6, 8),
+        new THREE.MeshLambertMaterial({ color: 0xffcc44 })
+      );
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = 0.05 * s;
+      this.root.add(ring);
+      const bolt = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055 * s, 0.055 * s, 0.09 * s, 6),
+        new THREE.MeshLambertMaterial({ color: 0xffe566 })
+      );
+      bolt.position.y = 0.05 * s;
+      this.root.add(bolt);
+      this._disc = disc;
     } else {
       // Shield potion: blue sphere with glow shell
       const s = def.scale;
@@ -149,6 +178,16 @@ const SPAWN_LIST = [
   { id: 'stimpack',  x:  180, z:  111, dy: 0 },  // basement storage
   { id: 'bigshield', x:  178, z:  128, dy: 5 },  // library
   { id: 'bigmed',    x:  182, z:  125, dy: 10 }, // master bedroom
+
+  // ── Armour plate spawns — military & combat zones ──────────────────────
+  { id: 'armourplate', x: -48,  z:  78  }, // Military Compound bunker
+  { id: 'armourplate', x: -58,  z:  70  }, // Military Compound secondary
+  { id: 'armourplate', x:  35,  z: -158 }, // Ancient Temple platform
+  { id: 'armourplate', x: -130, z:  45  }, // Frank's Jail
+  { id: 'armourplate', x:  92,  z:  -7  }, // Cedar Creek cabin
+  { id: 'armourplate', x:  60,  z: -32  }, // Open field mid-map
+  { id: 'armourplate', x: -25,  z: -60  }, // South field
+  { id: 'armourplate', x:  15,  z:  88  }, // North-east field
 ];
 
 export class PickupManager {
@@ -201,7 +240,7 @@ export class PickupManager {
 
   /** Spawn a random small loot drop at a world position (called on enemy death). */
   spawnLoot(worldPos) {
-    const table = ['medkit', 'shield', 'medkit', 'shield', 'bigmed'];
+    const table = ['medkit', 'shield', 'medkit', 'shield', 'bigmed', 'armourplate'];
     const id  = table[Math.floor(Math.random() * table.length)];
     const def = DEFS[id];
     const h   = this.world.getTerrainHeight(worldPos.x, worldPos.z);

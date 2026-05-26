@@ -6,10 +6,13 @@ export class HUD {
     this.inventory    = inventory;
     this.storm        = storm;
 
-    this._healthBar  = document.getElementById('health-bar');
-    this._healthVal  = document.getElementById('health-value');
-    this._shieldBar  = document.getElementById('shield-bar');
-    this._shieldVal  = document.getElementById('shield-value');
+    this._healthBar    = document.getElementById('health-bar');
+    this._healthVal    = document.getElementById('health-value');
+    this._shieldBar    = document.getElementById('shield-bar');
+    this._shieldVal    = document.getElementById('shield-value');
+    this._armourContainer = document.getElementById('armour-container');
+    this._armourBar    = document.getElementById('armour-bar');
+    this._armourVal    = document.getElementById('armour-value');
     this._minimap    = document.getElementById('minimap');
     this._mmCtx      = this._minimap.getContext('2d');
     this._mapScale   = 150 / world.size;
@@ -590,11 +593,20 @@ export class HUD {
     const p    = this.player;
     const hPct = (p.health / p.maxHealth) * 100;
     const sPct = (p.shield / p.maxShield) * 100;
+    const aPct = (p.armour / p.maxArmour) * 100;
 
     this._healthBar.style.width = hPct + '%';
     this._healthVal.textContent = Math.ceil(p.health);
     this._shieldBar.style.width = sPct + '%';
     this._shieldVal.textContent = Math.ceil(p.shield);
+
+    if (p.armour > 0) {
+      this._armourContainer.style.display = '';
+      this._armourBar.style.width = aPct + '%';
+      this._armourVal.textContent = Math.ceil(p.armour);
+    } else {
+      this._armourContainer.style.display = 'none';
+    }
 
     if (hPct > 50)      this._healthBar.style.background = 'linear-gradient(90deg,#22c55e,#86efac)';
     else if (hPct > 25) this._healthBar.style.background = 'linear-gradient(90deg,#f59e0b,#fcd34d)';

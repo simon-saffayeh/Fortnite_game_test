@@ -50,11 +50,13 @@ body {
 }
 #health-container { left: 32px; }
 #shield-container { left: 32px; bottom: 102px; }
+#armour-container { left: 32px; bottom: 156px; }
 
 .stat-label { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: rgba(255,255,255,0.65); width: 48px; }
 .stat-bar-bg { width: 180px; height: 10px; background: rgba(255,255,255,0.12); border-radius: 99px; overflow: hidden; }
 .stat-bar { height: 100%; width: 100%; border-radius: 99px; background: linear-gradient(90deg,#22c55e,#86efac); transition: width 0.3s ease; }
-.stat-bar.shield { background: linear-gradient(90deg,#3b82f6,#93c5fd); width: 0%; }
+.stat-bar.shield  { background: linear-gradient(90deg,#3b82f6,#93c5fd); width: 0%; }
+.stat-bar.armour  { background: linear-gradient(90deg,#d97706,#fcd34d); width: 0%; }
 .stat-value { font-size: 13px; font-weight: 700; min-width: 28px; text-align: right; }
 
 /* ── Crosshair (4-line dynamic) ─────────────────────────────────────────── */

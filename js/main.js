@@ -1182,7 +1182,7 @@ class Game {
         const def = this.pickups.tryCollect();
         if (def) {
           this.inventory.addConsumable(def);
-          this.hud.showPickupMessage(def.label, def.healHp > 0 ? 0x00ee66 : 0x44aaff);
+          this.hud.showPickupMessage(def.label, def.color);
         }
       }
 

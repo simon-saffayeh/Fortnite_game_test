@@ -15,8 +15,10 @@ export class Player {
     this.world  = world;
     this.health = MAX_HEALTH;
     this.shield = 0;
+    this.armour = 0;
     this.maxHealth = MAX_HEALTH;
     this.maxShield = MAX_SHIELD;
+    this.maxArmour = 100;
     this.dead   = false;
 
     this.velocity = new THREE.Vector3();
@@ -164,6 +166,11 @@ export class Player {
   takeDamage(amount, stormDamage = false, sourcePos = null, killerLabel = null) {
     if (this.dead) return;
     let remaining = amount;
+    if (!stormDamage && this.armour > 0) {
+      const absorbed = Math.min(this.armour, remaining);
+      this.armour  -= absorbed;
+      remaining    -= absorbed;
+    }
     if (!stormDamage && this.shield > 0) {
       const absorbed = Math.min(this.shield, remaining);
       this.shield   -= absorbed;
@@ -177,6 +184,10 @@ export class Player {
 
   healShield(amount) {
     this.shield = Math.min(this.maxShield, this.shield + amount);
+  }
+
+  healArmour(amount) {
+    this.armour = Math.min(this.maxArmour, this.armour + amount);
   }
 
   _die() {
