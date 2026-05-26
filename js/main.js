@@ -847,16 +847,6 @@ class Game {
     }
     this.scene.add(_prewarmGroup);
 
-    const _warmColors = [
-      [0xffffff, 0.9], [0xff7700, 0.65], [0xff3300, 0.55], [0xffdd00, 0.45],
-      [0xff2200, 0.22], [0x333333, 0.75], [0x222222, 1.0], [0xff5500, 0.55],
-      [0x884422, 0.55], [0x553322, 0.8], [0x222211, 0.6],
-      [0xff6600, 0.35], [0xffdd00, 0.2], [0x888888, 0.15],
-      [0xffee00, 0.25], [0xaaddff, 0.15], [0xffffff, 0.1], [0xffee00, 0.15],
-      [0xff1111, 0.2],
-    ];
-    for (const [c, s] of _warmColors) this.particles._getBurstMaterial(c, s);
-
     const _fxMat = (side = THREE.FrontSide) => new THREE.MeshBasicMaterial({
       color: 0xffffff, transparent: true, opacity: 1, depthWrite: false, side,
     });
