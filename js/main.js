@@ -1287,8 +1287,14 @@ class Game {
       this.shake.shake(0.09);
       this.camera3P.addRecoil(0.022);
     } else {
-      this.muzzle.flash(muzzlePos, 3.5);
+      // Flash power scales with weapon weight (particle-effects-upgrade)
+      const wid = weapon.def.id;
+      const flashPow = wid === 'sniper' || wid === 'huntingRifle' ? 7
+                     : wid === 'shotgun' || wid === 'rocketLauncher' || wid === 'grenadeLauncher' ? 5.5
+                     : 3.5;
+      this.muzzle.flash(muzzlePos, flashPow);
       this.particles.spawnBurst(muzzlePos, { count: 4, color: 0xffcc44, speed: 2.5, lifetime: 0.08, size: 0.1 });
+      this.particles.spawnBurst(muzzlePos, { count: 5, color: 0xff8800, speed: 3, lifetime: 0.07, size: 0.12, gravity: 2 });
       const shakeAmt  = weapon.def.id === 'sniper' ? 0.18 : weapon.def.id === 'shotgun' ? 0.14 : 0.06;
       const recoilAmt = weapon.def.id === 'sniper' ? 0.045 : weapon.def.id === 'shotgun' ? 0.030
                       : weapon.def.id === 'ar'     ? 0.010 : 0.018;
