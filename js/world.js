@@ -293,10 +293,14 @@ export class World {
     //   rayleigh    — overall sky scattering brightness (blue channel dominant)
     //   turbidity   — haze around the sun, affects both sky and sun-disc spread
     //   mie*        — directional/glow scattering toward the sun
-    u.turbidity.value        = 1.5;
+    u.turbidity.value        = 1.0;
     u.rayleigh.value         = 0.35;
-    u.mieCoefficient.value   = 0.003;
-    u.mieDirectionalG.value  = 0.72;
+    // Mie controls the sun glow halo. With the sky already darkened the
+    // default-ish mie produced a very visible bright ring around the sun.
+    // 0.0008 + lower G makes the glow much smaller and more diffuse —
+    // the sun reads as a bright spot, not a sheet or ring.
+    u.mieCoefficient.value   = 0.0008;
+    u.mieDirectionalG.value  = 0.55;
     u.sunPosition.value.copy(sunDir);
     this.scene.add(sky);
     this._sky = sky;
