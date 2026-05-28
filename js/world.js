@@ -287,15 +287,16 @@ export class World {
     const sky = new Sky();
     sky.scale.setScalar(450000);
     const u = sky.material.uniforms;
-    // Calmer atmosphere: lower rayleigh = less blue-channel scattering,
-    // lower turbidity = less haze near the sun. Together they keep the sky
-    // from blowing past the bloom threshold and from dumping too much IBL
-    // energy into the PMREM bake. Mie is softened too so the sun reads as
-    // a bright spot rather than a sheet.
-    u.turbidity.value        = 3.0;
-    u.rayleigh.value         = 0.9;
-    u.mieCoefficient.value   = 0.004;
-    u.mieDirectionalG.value  = 0.76;
+    // Soft late-afternoon atmosphere — keeps the sky readable as sky without
+    // blowing past the bloom threshold or dumping IBL energy. Each knob
+    // contributes:
+    //   rayleigh    — overall sky scattering brightness (blue channel dominant)
+    //   turbidity   — haze around the sun, affects both sky and sun-disc spread
+    //   mie*        — directional/glow scattering toward the sun
+    u.turbidity.value        = 1.5;
+    u.rayleigh.value         = 0.35;
+    u.mieCoefficient.value   = 0.003;
+    u.mieDirectionalG.value  = 0.72;
     u.sunPosition.value.copy(sunDir);
     this.scene.add(sky);
     this._sky = sky;
