@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo } from './materials.js';
 
 const GRID = 4;
 const REACH = 4;
@@ -24,12 +24,12 @@ function buildMesh(type, ghost) {
 
   let geo;
   if (type === 'wall') {
-    geo = new THREE.BoxGeometry(GRID, GRID, 0.32);
+    geo = boxGeo(GRID, GRID, 0.32);
   } else if (type === 'floor') {
-    geo = new THREE.BoxGeometry(GRID, 0.32, GRID);
+    geo = boxGeo(GRID, 0.32, GRID);
   } else {
     // Thin box tilted 45° — flat panel ramp, GRID×GRID footprint rising from 0 to GRID
-    geo = new THREE.BoxGeometry(GRID, 0.32, GRID * Math.SQRT2);
+    geo = boxGeo(GRID, 0.32, GRID * Math.SQRT2);
   }
 
   const mesh = new THREE.Mesh(geo, mat);

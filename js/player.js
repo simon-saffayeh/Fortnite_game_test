@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { buildGunModel } from './weapons.js';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo, fabricPBR, skinPBR, metalPBR } from './materials.js';
 
 const MOVE_SPEED   = 8;
 const SPRINT_SPEED = 16;
@@ -62,9 +62,19 @@ export class Player {
     this.body = new THREE.Group();
     this.root.add(this.body);
 
-    const lm  = hex => paintedPBR(hex);
+    // Heuristic: skin-tone hexes get the pore detail map, gold-ish hexes get
+    // a touch of metalness, everything else reads as cloth via the fabric
+    // weave normal map. Single chokepoint so every box() call self-routes.
+    const lm  = hex => {
+      if (hex === 0xffcba4 || hex === 0xc8906a) return skinPBR(hex);
+      const r = (hex >> 16) & 0xff, g = (hex >> 8) & 0xff, b = hex & 0xff;
+      if (r > 180 && g > 130 && b < 80) {
+        return paintedPBR(hex, { metal: 0.7, rough: 0.35, detail: 'metal', normalScale: 0.35 });
+      }
+      return fabricPBR(hex);
+    };
     const box = (w, h, d, hex, px, py, pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
+      const m = new THREE.Mesh(boxGeo(w, h, d), lm(hex));
       m.position.set(px, py, pz);
       m.castShadow = true;
       return m;
@@ -76,17 +86,39 @@ export class Player {
     this.body.add(box(0.18, 0.12, 0.05, 0xd4a017, 0, 0.97, 0.24));
     this.body.add(box(0.65, 0.25, 0.42, 0x37474f, 0, 0.87, 0));
 
-    // Head
+    // Head — skin block, ridged helmet shell, emissive visor band w/ catchlights.
     this.headGroup = new THREE.Group();
     this.headGroup.position.set(0, 1.9, 0);
     this.body.add(this.headGroup);
-    this.headGroup.add(box(0.60, 0.58, 0.56, 0xffcba4, 0, 0, 0));
-    const helm = new THREE.Mesh(new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), lm(0x8d6e63));
+    this.headGroup.add(new THREE.Mesh(boxGeo(0.60, 0.58, 0.56), skinPBR(0xffcba4)));
+    const helm = new THREE.Mesh(
+      new THREE.SphereGeometry(0.36, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6),
+      paintedPBR(0x8d6e63, { rough: 0.55, metal: 0.25 }),
+    );
     helm.position.set(0, 0.05, 0); helm.castShadow = true;
     this.headGroup.add(helm);
-    this.headGroup.add(box(0.52, 0.20, 0.08, 0xaaddff, 0, -0.04, 0.30));
-    this.headGroup.add(box(0.08, 0.20, 0.18, 0xffcba4, -0.34, 0, 0));
-    this.headGroup.add(box(0.08, 0.20, 0.18, 0xffcba4,  0.34, 0, 0));
+    // Visor: PBR emissive cyan so bloom picks it up + reads as "tactical lens".
+    const visor = new THREE.Mesh(
+      boxGeo(0.52, 0.20, 0.08),
+      paintedPBR(0x0c2030, {
+        rough: 0.15, metal: 0.5, emissive: 0x66ccff, emissiveIntensity: 0.9,
+      }),
+    );
+    visor.position.set(0, -0.04, 0.30);
+    this.headGroup.add(visor);
+    // Two tiny brighter catchlights on the visor — sells "eye contact" at distance.
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xeaffff });
+    for (const sx of [-0.13, 0.13]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 5), eyeMat);
+      eye.position.set(sx, -0.04, 0.35);
+      this.headGroup.add(eye);
+    }
+    // Ears (skin) stay as boxGeo.
+    for (const sx of [-0.34, 0.34]) {
+      const ear = new THREE.Mesh(boxGeo(0.08, 0.20, 0.18), skinPBR(0xffcba4));
+      ear.position.set(sx, 0, 0);
+      this.headGroup.add(ear);
+    }
 
     // Arms
     this.leftArmGroup  = new THREE.Group();

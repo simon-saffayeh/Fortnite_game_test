@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { WEAPON_DEFS, WeaponPickup } from './weapons.js';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo } from './materials.js';
 
 // ── Tunables ──────────────────────────────────────────────────────────────
 // Times are seconds, distances are world metres.
@@ -91,7 +91,7 @@ class SupplyDrop {
 
     // Basket / crate — the loot container.
     const basket = new THREE.Mesh(
-      new THREE.BoxGeometry(2.2, 1.4, 2.2),
+      boxGeo(2.2, 1.4, 2.2),
       paintedPBR(0x6b4423, { rough: 0.78 }),
     );
     basket.position.y = 0.7;
@@ -100,7 +100,7 @@ class SupplyDrop {
 
     // Crate banding (lighter wood strips for detail).
     const band = new THREE.Mesh(
-      new THREE.BoxGeometry(2.3, 0.18, 2.3),
+      boxGeo(2.3, 0.18, 2.3),
       paintedPBR(0x8b5a2b, { rough: 0.75 }),
     );
     band.position.y = 0.4; g.add(band);
@@ -108,7 +108,7 @@ class SupplyDrop {
 
     // Emissive lid trim signaling rarity.
     const lid = new THREE.Mesh(
-      new THREE.BoxGeometry(2.3, 0.12, 2.3),
+      boxGeo(2.3, 0.12, 2.3),
       paintedPBR(0xffaa00, { emissive: 0xffaa00, emissiveIntensity: 0.6, metal: 0.6, rough: 0.4 }),
     );
     lid.position.y = 1.42;

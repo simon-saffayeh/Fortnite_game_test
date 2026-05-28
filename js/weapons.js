@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR, metalPBR, polymerPBR } from './materials.js';
+import { paintedPBR, metalPBR, polymerPBR, boxGeo } from './materials.js';
 
 // ── Weapon definitions ───────────────────────────────────────────────────────
 // Each weapon is locked to exactly one rarity tier.
@@ -176,7 +176,7 @@ function _buildGunModelRaw(def, scale = 1) {
     return polymerPBR(hex);
   };
   const box = (w, h, d, hex, px, py, pz) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m(hex));
+    const mesh = new THREE.Mesh(boxGeo(w, h, d), m(hex));
     mesh.position.set(px, py, pz);
     mesh.castShadow = true;
     return mesh;
@@ -430,7 +430,7 @@ function _buildGunModelRaw(def, scale = 1) {
       const cx = Math.cos(a) * 0.33;
       const cz = -Math.sin(a) * 0.33 - 0.18;
       const tick = new THREE.Mesh(
-        new THREE.BoxGeometry(0.025, 0.02, 0.04),
+        boxGeo(0.025, 0.02, 0.04),
         m(0xffffff),
       );
       tick.position.set(cx, 0.08, cz);

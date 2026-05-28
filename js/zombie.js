@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
 
 const TOTAL_WAVES      = 10;
 const INTERMISSION_SEC = 15;
@@ -91,9 +91,15 @@ export class Zombie {
     }
     this.scene.add(this.root);
 
-    const lm = hex => paintedPBR(hex);
+    const lm = hex => {
+      // Zombie skin/bone palettes — route them through skinPBR so the pore
+      // detail map adds visible micro-texture; everything else is cloth.
+      const PAL_skin = [0x6f7d59, 0x55613f, 0x8a2020, 0x6a0808, 0x4a7a2a, 0x2a5010, 0xd9d2bd, 0xc8d2a0];
+      if (PAL_skin.includes(hex)) return skinPBR(hex);
+      return fabricPBR(hex);
+    };
     const box = (w, h, d, hex, px, py, pz, parent) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
+      const mesh = new THREE.Mesh(boxGeo(w, h, d), lm(hex));
       mesh.position.set(px, py, pz);
       mesh.castShadow = true;
       (parent || this.root).add(mesh);

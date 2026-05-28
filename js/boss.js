@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { WEAPON_DEFS, WeaponPickup } from './weapons.js';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
 
 // ── Ms. Franks (Frank's Jail boss) ───────────────────────────────────────
 //
@@ -204,11 +204,15 @@ export class MsFranksBoss {
 
     // paintedPBR() caches globally by (color, opts), so we don't need a
     // per-boss matCache — same call with same hex returns the same instance.
-    const lm = hex => paintedPBR(hex).clone();
-    // .clone() because the hit-flash code below mutates .color per mesh.
-    // Cloning still reuses the shader program; only the uniform set diverges.
+    // Same skin/cloth heuristic as the other characters. .clone() because the
+    // hit-flash code below mutates .color per mesh; cloning still reuses the
+    // shader program and detail textures (only uniforms diverge).
+    const lm = hex => {
+      if (hex === 0xffe0c0 || hex === 0xe8b994 || hex === 0xffcba4) return skinPBR(hex).clone();
+      return fabricPBR(hex).clone();
+    };
     const box = (w, h, d, hex, px, py, pz) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
+      const mesh = new THREE.Mesh(boxGeo(w, h, d), lm(hex));
       mesh.position.set(px, py, pz);
       mesh.castShadow = true;
       return mesh;

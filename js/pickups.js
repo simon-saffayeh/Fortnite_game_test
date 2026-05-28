@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo, polymerPBR, metalPBR } from './materials.js';
 
 const DEFS = {
   medkit:      { id: 'medkit',      label: 'Med Kit',      healHp: 50,  healShield: 0,  healArmour: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true, useTime: 3.0 },
@@ -48,19 +48,19 @@ class HealthPickup {
     } else if (def.healHp > 0) {
       // Med kit: green box with white cross
       const s = def.scale;
-      const body = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.32 * s, 0.5 * s), lm(def.color));
+      const body = new THREE.Mesh(boxGeo(0.5 * s, 0.32 * s, 0.5 * s), lm(def.color));
       body.castShadow = true;
       this.root.add(body);
       // Cross horizontal bar
-      const h = new THREE.Mesh(new THREE.BoxGeometry(0.36 * s, 0.1 * s, 0.1 * s), lm(0xffffff));
+      const h = new THREE.Mesh(boxGeo(0.36 * s, 0.1 * s, 0.1 * s), lm(0xffffff));
       h.position.y = 0.17 * s;
       this.root.add(h);
       // Cross vertical bar
-      const v = new THREE.Mesh(new THREE.BoxGeometry(0.1 * s, 0.1 * s, 0.36 * s), lm(0xffffff));
+      const v = new THREE.Mesh(boxGeo(0.1 * s, 0.1 * s, 0.36 * s), lm(0xffffff));
       v.position.y = 0.17 * s;
       this.root.add(v);
       // Red lid trim
-      const lid = new THREE.Mesh(new THREE.BoxGeometry(0.52 * s, 0.06 * s, 0.52 * s), lm(0xcc2222));
+      const lid = new THREE.Mesh(boxGeo(0.52 * s, 0.06 * s, 0.52 * s), lm(0xcc2222));
       lid.position.y = 0.19 * s;
       this.root.add(lid);
     } else if (def.healArmour > 0) {

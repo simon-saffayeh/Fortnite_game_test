@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
 
 const FOOT_OFFSET    = 0.42;
 const DETECT_RANGE   = 65;
@@ -60,9 +60,12 @@ export class Enemy {
     this.root.position.copy(pos);
     this.scene.add(this.root);
 
-    const lm = hex => paintedPBR(hex);
+    const lm = hex => {
+      if (hex === 0xc8906a || hex === 0xffcba4) return skinPBR(hex);
+      return fabricPBR(hex);
+    };
     const box = (w, h, d, hex, px, py, pz) => {
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
+      const mesh = new THREE.Mesh(boxGeo(w, h, d), lm(hex));
       mesh.position.set(px, py, pz);
       mesh.castShadow = true;
       return mesh;

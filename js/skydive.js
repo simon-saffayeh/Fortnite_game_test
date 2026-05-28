@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo } from './materials.js';
 
 // ── Deploy phase: ride the battle bus, jump out, skydive, parachute, land ─────
 // Fortnite-style match intro. While active, this controller fully owns the
@@ -591,16 +591,16 @@ export class DeployController {
     const lm  = hex => paintedPBR(hex);
 
     // Body (long axis along Z so it aligns with travel direction)
-    const body = new THREE.Mesh(new THREE.BoxGeometry(7, 3.4, 17), lm(0x2f6fc4));
+    const body = new THREE.Mesh(boxGeo(7, 3.4, 17), lm(0x2f6fc4));
     body.position.y = 0;
     bus.add(body);
     // Roof
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(7.1, 0.5, 17.1), lm(0xf2c43a));
+    const roof = new THREE.Mesh(boxGeo(7.1, 0.5, 17.1), lm(0xf2c43a));
     roof.position.y = 1.95;
     bus.add(roof);
     // Window strips
     for (const side of [-1, 1]) {
-      const win = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.1, 15.5), lm(0xaad8ff));
+      const win = new THREE.Mesh(boxGeo(0.15, 1.1, 15.5), lm(0xaad8ff));
       win.position.set(side * 3.55, 0.6, 0);
       bus.add(win);
     }

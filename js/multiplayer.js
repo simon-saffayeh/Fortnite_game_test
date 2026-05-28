@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { paintedPBR } from './materials.js';
+import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
 
 // ── Spawn points for up to 20 players — POI regions + mid-map + edges ──
 // Each point is on flat reachable terrain, spaced to avoid spawn-clusters.
@@ -61,11 +61,18 @@ export class RemotePlayer {
 
     // Per-instance material cache — share materials across same-color parts so
     // a 25-mesh character has ~6 materials instead of 25. Materials, not meshes,
-    // dominate draw-call cost in three.js. paintedPBR() also caches globally,
-    // so a remote player and the local player reuse the same hex-keyed PBR.
-    const matFor = hex => paintedPBR(hex);
+    // dominate draw-call cost in three.js. Heuristic routes skin/gold/cloth
+    // colors to the right detail map (fabric weave, pore noise, metal streaks).
+    const matFor = hex => {
+      if (hex === 0xffcba4 || hex === 0xc8906a) return skinPBR(hex);
+      const r = (hex >> 16) & 0xff, g = (hex >> 8) & 0xff, b = hex & 0xff;
+      if (r > 180 && g > 130 && b < 80) {
+        return paintedPBR(hex, { metal: 0.7, rough: 0.35, detail: 'metal', normalScale: 0.35 });
+      }
+      return fabricPBR(hex);
+    };
     const box = (w, h, d, hex, px, py, pz) => {
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matFor(hex));
+      const m = new THREE.Mesh(boxGeo(w, h, d), matFor(hex));
       m.position.set(px, py, pz);
       m.castShadow = true;
       return m;
@@ -85,22 +92,32 @@ export class RemotePlayer {
     this._head = new THREE.Group();
     this._head.position.set(0, 2.00, 0);
     this._torso.add(this._head);
-    this._head.add(box(0.78, 0.72, 0.72, 0xffcba4, 0, 0, 0));
+    this._head.add(new THREE.Mesh(boxGeo(0.78, 0.72, 0.72), skinPBR(0xffcba4)));
     const helm = new THREE.Mesh(
       new THREE.SphereGeometry(0.46, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.6),
-      matFor(0x6a0000),
+      paintedPBR(0x6a0000, { rough: 0.55, metal: 0.25 }),
     );
     helm.position.set(0, 0.08, 0);
     helm.castShadow = true;
     this._head.add(helm);
-    // Visor — bright unshaded strip, no shadow casting (cheap, no lighting cost)
+    // Visor — emissive lens so distant opponents read their helmet glow.
+    // Recoloured by setTeammate to swap green/red allegiance.
     const visor = new THREE.Mesh(
-      new THREE.BoxGeometry(0.62, 0.10, 0.04),
-      new THREE.MeshBasicMaterial({ color: 0xff5533 }),
+      boxGeo(0.62, 0.10, 0.04),
+      paintedPBR(0x180a08, {
+        rough: 0.15, metal: 0.5, emissive: 0xff5533, emissiveIntensity: 1.1,
+      }).clone(),     // clone so setTeammate's emissive recolor doesn't leak
     );
     visor.position.set(0, -0.04, 0.36);
     this._head.add(visor);
-    this._visor = visor;  // recolored by setTeammate
+    this._visor = visor;
+    // Catchlight dots — tiny bright spheres that read as "eyes" at a distance.
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xffe6dc });
+    for (const sx of [-0.16, 0.16]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.035, 6, 5), eyeMat);
+      eye.position.set(sx, -0.04, 0.40);
+      this._head.add(eye);
+    }
 
     // ── Articulated arms ────────────────────────────────────────────────
     // shoulder pivot ▶ upper arm + pauldron
@@ -220,7 +237,13 @@ export class RemotePlayer {
   setTeammate(isTeammate) {
     this.isTeammate = !!isTeammate;
     if (this._hpFill) this._hpFill.material.color.setHex(isTeammate ? 0x22dd66 : 0xee2222);
-    if (this._visor)  this._visor.material.color.setHex(isTeammate ? 0x33ff88 : 0xff5533);
+    if (this._visor) {
+      // Visor is now an emissive PBR material — swap the emissive (lens
+      // glow) instead of the base color so the green/red allegiance read
+      // is visible at distance under bloom.
+      const tint = isTeammate ? 0x33ff88 : 0xff5533;
+      this._visor.material.emissive.setHex(tint);
+    }
     if (this._tag) this._tag.classList.toggle('teammate', !!isTeammate);
   }
 
