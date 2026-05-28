@@ -237,7 +237,11 @@ export class World {
     if (Graphics.cloudCount > 0) this._buildClouds();
   }
 
-  // Original cheap path — vertex-coloured sphere + sun disc + glow.
+  // Cheap path — vertex-coloured gradient sphere. No sun disc or glow ring;
+  // the previous version had a flat CircleGeometry sun at (600, 800, -1200)
+  // plus an 80-unit-radius outer glow which bloomed into a very visible
+  // bright ring against the now-dim sky. Direct sunlight still comes from
+  // the DirectionalLight in _buildLights, so the world stays lit.
   _buildSkyGradient() {
     const geo = new THREE.SphereGeometry(1800, 32, 16);
     geo.scale(-1, 1, 1);
@@ -260,18 +264,6 @@ export class World {
       vertexColors: true, side: THREE.BackSide,
     }));
     this.scene.add(sky);
-
-    const sunGeo = new THREE.CircleGeometry(40, 32);
-    const sun = new THREE.Mesh(sunGeo, new THREE.MeshBasicMaterial({ color: 0xfffde0 }));
-    sun.position.set(600, 800, -1200);
-    this.scene.add(sun);
-
-    const glow = new THREE.Mesh(
-      new THREE.CircleGeometry(80, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffd580, transparent: true, opacity: 0.2 }),
-    );
-    glow.position.set(600, 800, -1200.5);
-    this.scene.add(glow);
   }
 
   // Atmospheric Sky shader + PMREM-baked environment for IBL. Sun direction
@@ -305,15 +297,14 @@ export class World {
     u.sunPosition.value.copy(sunDir);
 
     // Patch the sun-disc multiplier inside the Sky fragment shader. The
-    // three/addons Sky uses `sunE * 19000.0 * Fex * sundisk` to render the
-    // sun, which is realistic-physics-bright (you're literally looking at the
-    // sun) and overwhelms everything else even with mie and rayleigh near zero.
-    // Replacing the constant with a much smaller one dims the disc without
-    // touching any uniforms — sky color and IBL energy are unaffected.
-    // Falls back silently if the source ever changes shape.
+    // three/addons Sky uses `sunE * 19000.0 * Fex * sundisk` for the sun
+    // (physically accurate — you're looking at the sun). Setting it to 0.0
+    // removes the visible disc entirely. The rayleigh sky color and IBL
+    // bake are unaffected — direct sunlight still comes from the
+    // DirectionalLight, which is separate from the Sky shader.
     const fs = sky.material.fragmentShader;
     if (typeof fs === 'string' && fs.includes('19000.0')) {
-      sky.material.fragmentShader = fs.replace('19000.0', '80.0');
+      sky.material.fragmentShader = fs.replace('19000.0', '0.0');
       sky.material.needsUpdate = true;
     }
 
