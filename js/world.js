@@ -295,12 +295,13 @@ export class World {
     //   mie*        — directional/glow scattering toward the sun
     u.turbidity.value        = 1.0;
     u.rayleigh.value         = 0.35;
-    // Mie controls the sun glow halo. With the sky already darkened the
-    // default-ish mie produced a very visible bright ring around the sun.
-    // 0.0008 + lower G makes the glow much smaller and more diffuse —
-    // the sun reads as a bright spot, not a sheet or ring.
-    u.mieCoefficient.value   = 0.0008;
-    u.mieDirectionalG.value  = 0.55;
+    // Mie controls the sun-glow halo. Earlier passes kept producing a
+    // bright ring around the sun, so mie is pushed near-zero: the sun
+    // disc is barely visible and there's no halation at all. Direct sun
+    // illumination still comes from the DirectionalLight, which is
+    // separate from the Sky shader.
+    u.mieCoefficient.value   = 0.0001;
+    u.mieDirectionalG.value  = 0.40;
     u.sunPosition.value.copy(sunDir);
     this.scene.add(sky);
     this._sky = sky;
