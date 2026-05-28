@@ -101,7 +101,7 @@ export class Player {
     const visor = new THREE.Mesh(
       boxGeo(0.52, 0.20, 0.08),
       paintedPBR(0x0c2030, {
-        rough: 0.15, metal: 0.5, emissive: 0x66ccff, emissiveIntensity: 0.9,
+        rough: 0.15, metal: 0.5, emissive: 0x66ccff, emissiveIntensity: 0.45,
       }),
     );
     visor.position.set(0, -0.04, 0.30);

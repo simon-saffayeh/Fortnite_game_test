@@ -287,10 +287,15 @@ export class World {
     const sky = new Sky();
     sky.scale.setScalar(450000);
     const u = sky.material.uniforms;
-    u.turbidity.value        = 6.0;
-    u.rayleigh.value         = 1.6;
-    u.mieCoefficient.value   = 0.006;
-    u.mieDirectionalG.value  = 0.82;
+    // Calmer atmosphere: lower rayleigh = less blue-channel scattering,
+    // lower turbidity = less haze near the sun. Together they keep the sky
+    // from blowing past the bloom threshold and from dumping too much IBL
+    // energy into the PMREM bake. Mie is softened too so the sun reads as
+    // a bright spot rather than a sheet.
+    u.turbidity.value        = 3.0;
+    u.rayleigh.value         = 0.9;
+    u.mieCoefficient.value   = 0.004;
+    u.mieDirectionalG.value  = 0.76;
     u.sunPosition.value.copy(sunDir);
     this.scene.add(sky);
     this._sky = sky;
@@ -360,10 +365,12 @@ export class World {
     // When PBR + IBL are active, ambient + hemi contribute on TOP of the
     // baked envMap; without dialling them down the scene blows out. On LOW
     // (no IBL) keep the original warmer values so shading stays the same.
+    // These are aggressive on purpose — IBL already delivers wraparound
+    // sky+ground contribution, so hemi/ambient are mostly for tint.
     const iblActive = Graphics.envMapEnabled && Graphics.pbrEnabled;
-    const hemiInt   = iblActive ? 0.45 : 1.00;
-    const ambInt    = iblActive ? 0.20 : 0.60;
-    const sunInt    = iblActive ? 2.30 : 2.60;
+    const hemiInt   = iblActive ? 0.20 : 1.00;
+    const ambInt    = iblActive ? 0.08 : 0.60;
+    const sunInt    = iblActive ? 1.80 : 2.60;
 
     const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, hemiInt);
     this.scene.add(hemi);

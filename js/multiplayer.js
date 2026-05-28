@@ -105,7 +105,7 @@ export class RemotePlayer {
     const visor = new THREE.Mesh(
       boxGeo(0.62, 0.10, 0.04),
       paintedPBR(0x180a08, {
-        rough: 0.15, metal: 0.5, emissive: 0xff5533, emissiveIntensity: 1.1,
+        rough: 0.15, metal: 0.5, emissive: 0xff5533, emissiveIntensity: 0.55,
       }).clone(),     // clone so setTeammate's emissive recolor doesn't leak
     );
     visor.position.set(0, -0.04, 0.36);

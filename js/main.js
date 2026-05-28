@@ -523,9 +523,11 @@ class Game {
     this.renderer.shadowMap.enabled   = Graphics.shadowsEnabled;
     this.renderer.shadowMap.type      = THREE.PCFShadowMap;
     this.renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-    // PBR + IBL benefits from a slightly lower exposure since the env map
-    // adds its own ambient energy. Lambert-only stays at the original value.
-    this.renderer.toneMappingExposure = Graphics.pbrEnabled ? 1.05 : 1.25;
+    // PBR + IBL adds significant ambient energy from the baked sky envMap.
+    // Stacking that on top of the original hemi/amb/sun budget overexposes
+    // the scene (whites everywhere, sky blowout). Drop exposure further when
+    // PBR is active — the loss is more than recovered by the IBL specular.
+    this.renderer.toneMappingExposure = Graphics.pbrEnabled ? 0.78 : 1.25;
     this.renderer.outputColorSpace    = THREE.SRGBColorSpace;
   }
 
@@ -546,7 +548,11 @@ class Game {
     // it naturally, threshold 0.85 ignores normal-lit surfaces and only
     // catches emissives (storm, sun, muzzle flashes, fire pits, supply-drop lids).
     if (Graphics.bloomEnabled) {
-      const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.4, 0.85);
+      // With PBR + IBL the average surface brightness is higher, so a 0.85
+      // threshold catches a lot more than just emissives. 0.92 + reduced
+      // strength gives a small headroom — sun disc / supply-drop lid /
+      // storm wall still bloom; ordinary lit surfaces don't.
+      const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.4, 0.4, 0.92);
       this.composer.addPass(bloom);
     }
 

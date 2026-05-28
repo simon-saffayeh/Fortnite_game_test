@@ -22,8 +22,8 @@ const _cacheLambert = new Map();
 const _cacheGeo     = new Map();
 
 /** Stable cache key from the option bag. */
-function _key(color, rough, metal, emissive, emissiveIntensity, transparent, opacity, side, detail, normalScale) {
-  return `${color}|${rough}|${metal}|${emissive}|${emissiveIntensity}|${transparent ? 1 : 0}|${opacity}|${side}|${detail ?? ''}|${normalScale ?? 1}`;
+function _key(color, rough, metal, emissive, emissiveIntensity, transparent, opacity, side, detail, normalScale, envMapIntensity) {
+  return `${color}|${rough}|${metal}|${emissive}|${emissiveIntensity}|${transparent ? 1 : 0}|${opacity}|${side}|${detail ?? ''}|${normalScale ?? 1}|${envMapIntensity ?? 0.55}`;
 }
 
 /**
@@ -51,7 +51,7 @@ export function paintedPBR(color, opts = {}) {
   const detail            = opts.detail            ?? null;
   const normalScale       = opts.normalScale       ?? 0.6;
 
-  const key = _key(color, rough, metal, emissive, emissiveIntensity, transparent, opacity, side, detail, normalScale);
+  const key = _key(color, rough, metal, emissive, emissiveIntensity, transparent, opacity, side, detail, normalScale, opts.envMapIntensity);
 
   if (usePBR) {
     let mat = _cachePBR.get(key);
@@ -65,7 +65,10 @@ export function paintedPBR(color, opts = {}) {
         transparent,
         opacity,
         side,
-        envMapIntensity: 1.0,
+        // 0.55 keeps the sky-bake contribution visible without overdriving
+        // every surface. Override per-material via opts.envMapIntensity for
+        // genuinely metallic things that should still mirror the sky.
+        envMapIntensity: opts.envMapIntensity ?? 0.55,
       };
       // Detail maps come from a procedural library. Only attach if the
       // current preset actually wants them and we have one for that name.
