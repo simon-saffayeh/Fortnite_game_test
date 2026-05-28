@@ -296,12 +296,11 @@ export class World {
     u.mieDirectionalG.value  = 0.40;
     u.sunPosition.value.copy(sunDir);
 
-    // Patch the sun-disc multiplier inside the Sky fragment shader. The
-    // three/addons Sky uses `sunE * 19000.0 * Fex * sundisk` for the sun
-    // (physically accurate — you're looking at the sun). Setting it to 0.0
-    // removes the visible disc entirely. The rayleigh sky color and IBL
-    // bake are unaffected — direct sunlight still comes from the
-    // DirectionalLight, which is separate from the Sky shader.
+    // Patch the sun-disc multiplier inside the Sky fragment shader to 0.
+    // The three/addons Sky uses `sunE * 19000.0 * Fex * sundisk` which is
+    // physically accurate (you're looking at the actual sun) and overwhelms
+    // everything else. Killing the disc here, then adding our own soft sun
+    // mesh below gives a controllable, screenshot-friendly result.
     const fs = sky.material.fragmentShader;
     if (typeof fs === 'string' && fs.includes('19000.0')) {
       sky.material.fragmentShader = fs.replace('19000.0', '0.0');
@@ -310,6 +309,41 @@ export class World {
 
     this.scene.add(sky);
     this._sky = sky;
+
+    // ── Soft custom sun ────────────────────────────────────────────────
+    // Three stacked spheres at the sun direction: a small bright core +
+    // two diffuse halo layers. Distances are well inside the camera far
+    // plane (2000) but far enough to read as "in the sky" through fog.
+    // Colors stay warm but well below the bloom threshold (after tone
+    // mapping) so the sun reads as glowing without producing the giant
+    // bright ring artifact the raw Sky-shader disc produced.
+    const sunPos = sunDir.clone().multiplyScalar(1500);
+    const sunGroup = new THREE.Group();
+    sunGroup.position.copy(sunPos);
+    // Sun mesh stays in front of distance fog by hiding fog interaction.
+    const sunCore = new THREE.Mesh(
+      new THREE.SphereGeometry(18, 16, 12),
+      new THREE.MeshBasicMaterial({ color: 0xfff2d8, fog: false }),
+    );
+    const sunHalo = new THREE.Mesh(
+      new THREE.SphereGeometry(45, 18, 14),
+      new THREE.MeshBasicMaterial({
+        color: 0xffd8a0, transparent: true, opacity: 0.32,
+        depthWrite: false, fog: false,
+      }),
+    );
+    const sunGlow = new THREE.Mesh(
+      new THREE.SphereGeometry(95, 20, 14),
+      new THREE.MeshBasicMaterial({
+        color: 0xffb070, transparent: true, opacity: 0.10,
+        depthWrite: false, fog: false,
+      }),
+    );
+    sunGroup.add(sunGlow);
+    sunGroup.add(sunHalo);
+    sunGroup.add(sunCore);
+    this.scene.add(sunGroup);
+    this._sunMesh = sunGroup;
 
     // Background sample of the sky drives ambient fallback when scene.environment
     // is unavailable (e.g. envMap bake skipped). Cheap colour pick at horizon.

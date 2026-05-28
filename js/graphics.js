@@ -28,7 +28,7 @@ const PRESETS = {
     taaEnabled:          false,
     volumetricEnabled:   false,
     waterReflection:     false,
-    dynamicResolution:   true,          // still scale down if struggling
+    dynamicResolution:   false,         // off — was producing permanent blur
   },
   medium: {
     label:               'MEDIUM',
@@ -51,7 +51,7 @@ const PRESETS = {
     taaEnabled:          false,
     volumetricEnabled:   false,
     waterReflection:     false,
-    dynamicResolution:   true,
+    dynamicResolution:   false,
   },
   high: {
     label:               'HIGH',
@@ -74,7 +74,7 @@ const PRESETS = {
     taaEnabled:          false,
     volumetricEnabled:   false,
     waterReflection:     true,
-    dynamicResolution:   true,
+    dynamicResolution:   false,
   },
   ultra: {
     label:               'ULTRA',
