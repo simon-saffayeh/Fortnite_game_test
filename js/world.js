@@ -303,6 +303,20 @@ export class World {
     u.mieCoefficient.value   = 0.0001;
     u.mieDirectionalG.value  = 0.40;
     u.sunPosition.value.copy(sunDir);
+
+    // Patch the sun-disc multiplier inside the Sky fragment shader. The
+    // three/addons Sky uses `sunE * 19000.0 * Fex * sundisk` to render the
+    // sun, which is realistic-physics-bright (you're literally looking at the
+    // sun) and overwhelms everything else even with mie and rayleigh near zero.
+    // Replacing the constant with a much smaller one dims the disc without
+    // touching any uniforms — sky color and IBL energy are unaffected.
+    // Falls back silently if the source ever changes shape.
+    const fs = sky.material.fragmentShader;
+    if (typeof fs === 'string' && fs.includes('19000.0')) {
+      sky.material.fragmentShader = fs.replace('19000.0', '80.0');
+      sky.material.needsUpdate = true;
+    }
+
     this.scene.add(sky);
     this._sky = sky;
 
