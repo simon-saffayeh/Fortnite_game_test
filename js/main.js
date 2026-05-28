@@ -24,6 +24,7 @@ import { DeployController } from './skydive.js';
 import { SpectatorController, PHASE_SPECTATING } from './spectator.js';
 import { SupplyDropManager } from './supplyDrops.js';
 import { AmmoSystem, AMMO_VISUAL } from './ammo.js';
+import { Graphics, PRESETS } from './graphics.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -89,6 +90,18 @@ class Menu {
       const cur = JSON.parse(localStorage.getItem('bi_settings') || '{}');
       cur.sensitivity = parseFloat(sensSlider.value);
       localStorage.setItem('bi_settings', JSON.stringify(cur));
+    });
+
+    // Graphics quality picker (home screen). Auto-detected on first load
+    // and persisted; LOW/MEDIUM/HIGH/ULTRA flip every renderer flag and the
+    // PBR/Lambert split. Changing during a session takes effect on next match.
+    const qBtns = document.querySelectorAll('.quality-btn');
+    qBtns.forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.quality === Graphics.presetName);
+      btn.addEventListener('click', () => {
+        Graphics.setPreset(btn.dataset.quality);
+        qBtns.forEach(b => b.classList.toggle('active', b === btn));
+      });
     });
 
     // Solo difficulty picker — Easy / Medium / Hard / Expert.
@@ -505,12 +518,14 @@ class Game {
 
   _setupRenderer() {
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, Graphics.pixelRatioCap));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled   = true;
+    this.renderer.shadowMap.enabled   = Graphics.shadowsEnabled;
     this.renderer.shadowMap.type      = THREE.PCFShadowMap;
     this.renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure  = 1.25;
+    // PBR + IBL benefits from a slightly lower exposure since the env map
+    // adds its own ambient energy. Lambert-only stays at the original value.
+    this.renderer.toneMappingExposure = Graphics.pbrEnabled ? 1.05 : 1.25;
     this.renderer.outputColorSpace    = THREE.SRGBColorSpace;
   }
 
@@ -522,7 +537,7 @@ class Game {
   _setupPostFX() {
     const w = window.innerWidth, h = window.innerHeight;
     this.composer = new EffectComposer(this.renderer);
-    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.composer.setPixelRatio(Math.min(window.devicePixelRatio, Graphics.pixelRatioCap));
     this.composer.setSize(w, h);
 
     this.composer.addPass(new RenderPass(this.scene, this.camera));
@@ -530,8 +545,10 @@ class Game {
     // Bloom — strength 0.55 is moderate (not blown-out), radius 0.4 spreads
     // it naturally, threshold 0.85 ignores normal-lit surfaces and only
     // catches emissives (storm, sun, muzzle flashes, fire pits, supply-drop lids).
-    const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.4, 0.85);
-    this.composer.addPass(bloom);
+    if (Graphics.bloomEnabled) {
+      const bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.4, 0.85);
+      this.composer.addPass(bloom);
+    }
 
     // ── Cel-shaded outline pass ─────────────────────────────────────────
     // Sobel-style edge detection on screen-space luminance — catches the
@@ -587,7 +604,7 @@ class Game {
         }
       `,
     });
-    this.composer.addPass(this._outlinePass);
+    if (Graphics.outlineEnabled) this.composer.addPass(this._outlinePass);
 
     // Vignette + film grain pass. Vignette darkens corners; grain is a tiny
     // animated noise (~3% brightness wobble) for cinematic texture. Time
@@ -650,7 +667,8 @@ class Game {
     // ── 1. Terrain ────────────────────────────────────────────────────
     step('Generating terrain…', 12);
     await frame(); // let bar paint before synchronous terrain build
-    this.world = new World(this.scene);
+    // World needs the renderer to run the PMREM bake for IBL.
+    this.world = new World(this.scene, this.renderer);
     this.world.generate();
 
     // ── 2. Nature ─────────────────────────────────────────────────────
@@ -2018,7 +2036,10 @@ class Game {
    * Falls back to a direct renderer.render if the composer wasn't set up
    * (defensive — should never happen in normal startup).
    */
-  _render() {
+  _render(dt = 0.016) {
+    // Adaptive resolution: nudge composer pixel ratio down if frame times
+    // spike, back up when they recover. No-op when dynamicResolution=false.
+    Graphics.tickAdaptiveResolution(dt, this.composer, this.renderer);
     if (this.composer) {
       if (this._grainPass) this._grainPass.uniforms.uTime.value += 0.016;
       this.composer.render();
@@ -2056,7 +2077,7 @@ class Game {
         // pick a landing spot — repaint each frame so the player arrow
         // and bus path animate live.
         if (this._mapOpen) this._drawMap();
-        this._render();
+        this._render(dt);
         return;
       }
 
@@ -2085,7 +2106,7 @@ class Game {
             this.net.sendState(this.player.getPosition(), this.player.getYaw(), PHASE_SPECTATING);
           }
         }
-        this._render();
+        this._render(dt);
         return;
       }
 
@@ -2169,7 +2190,7 @@ class Game {
 
       if (this._mapOpen) this._drawMap();
 
-      this._render();
+      this._render(dt);
     };
     loop();
   }

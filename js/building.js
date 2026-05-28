@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR } from './materials.js';
 
 const GRID = 4;
 const REACH = 4;
@@ -13,12 +14,13 @@ const PIECE_DEFS = {
 
 function buildMesh(type, ghost) {
   const color   = ghost ? 0x44aaff : 0xb07838;
-  const mat = new THREE.MeshLambertMaterial({
-    color,
-    transparent: ghost,
-    opacity:     ghost ? 0.50 : 1.0,
-    depthWrite:  !ghost,
-  });
+  // Ghost pieces stay Lambert (need depthWrite tweak the factory doesn't expose);
+  // built pieces use the PBR factory so they pick up sun specular and IBL.
+  const mat = ghost
+    ? new THREE.MeshLambertMaterial({
+        color, transparent: true, opacity: 0.50, depthWrite: false,
+      })
+    : paintedPBR(color, { rough: 0.7 });
 
   let geo;
   if (type === 'wall') {

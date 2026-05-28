@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WEAPON_DEFS, WeaponPickup } from './weapons.js';
+import { paintedPBR } from './materials.js';
 
 // ── Tunables ──────────────────────────────────────────────────────────────
 // Times are seconds, distances are world metres.
@@ -62,8 +63,8 @@ class SupplyDrop {
     // Balloon canopy — hemispherical, gold/red striped via material groups.
     const balloonGeo = new THREE.SphereGeometry(2.8, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.65);
     balloonGeo.computeVertexNormals();
-    const stripeA = new THREE.MeshLambertMaterial({ color: 0xd62828 });
-    const stripeB = new THREE.MeshLambertMaterial({ color: 0xfcbf49 });
+    const stripeA = paintedPBR(0xd62828, { rough: 0.85 });   // fabric-like canopy
+    const stripeB = paintedPBR(0xfcbf49, { rough: 0.85 });
     // Assign alternating material indices per face to get stripes.
     // (Cheap: just by face index modulo so we avoid a custom shader.)
     const indexCount = balloonGeo.index.count;
@@ -83,7 +84,7 @@ class SupplyDrop {
     // Cap / vent at the top of the balloon.
     const top = new THREE.Mesh(
       new THREE.CylinderGeometry(0.45, 0.5, 0.4, 10),
-      new THREE.MeshLambertMaterial({ color: 0x3a2a18 }),
+      paintedPBR(0x3a2a18, { rough: 0.85 }),
     );
     top.position.y = 6.4;
     g.add(top);
@@ -91,7 +92,7 @@ class SupplyDrop {
     // Basket / crate — the loot container.
     const basket = new THREE.Mesh(
       new THREE.BoxGeometry(2.2, 1.4, 2.2),
-      new THREE.MeshLambertMaterial({ color: 0x6b4423 }),
+      paintedPBR(0x6b4423, { rough: 0.78 }),
     );
     basket.position.y = 0.7;
     basket.castShadow = true;
@@ -100,7 +101,7 @@ class SupplyDrop {
     // Crate banding (lighter wood strips for detail).
     const band = new THREE.Mesh(
       new THREE.BoxGeometry(2.3, 0.18, 2.3),
-      new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
+      paintedPBR(0x8b5a2b, { rough: 0.75 }),
     );
     band.position.y = 0.4; g.add(band);
     const band2 = band.clone(); band2.position.y = 1.0; g.add(band2);
@@ -108,9 +109,7 @@ class SupplyDrop {
     // Emissive lid trim signaling rarity.
     const lid = new THREE.Mesh(
       new THREE.BoxGeometry(2.3, 0.12, 2.3),
-      new THREE.MeshLambertMaterial({
-        color: 0xffaa00, emissive: 0xffaa00, emissiveIntensity: 0.6,
-      }),
+      paintedPBR(0xffaa00, { emissive: 0xffaa00, emissiveIntensity: 0.6, metal: 0.6, rough: 0.4 }),
     );
     lid.position.y = 1.42;
     g.add(lid);
@@ -132,9 +131,7 @@ class SupplyDrop {
     // Flame puff inside the balloon, gently emissive.
     const flame = new THREE.Mesh(
       new THREE.SphereGeometry(0.35, 8, 6),
-      new THREE.MeshLambertMaterial({
-        color: 0xffaa44, emissive: 0xff6622, emissiveIntensity: 1.2,
-      }),
+      paintedPBR(0xffaa44, { emissive: 0xff6622, emissiveIntensity: 1.2 }),
     );
     flame.position.y = 2.1;
     g.add(flame);

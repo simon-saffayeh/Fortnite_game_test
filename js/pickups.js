@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR } from './materials.js';
 
 const DEFS = {
   medkit:      { id: 'medkit',      label: 'Med Kit',      healHp: 50,  healShield: 0,  healArmour: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true, useTime: 3.0 },
@@ -24,13 +25,13 @@ class HealthPickup {
     this.root = new THREE.Group();
     this.root.position.set(position.x, this._baseY, position.z);
 
-    const lm = hex => new THREE.MeshLambertMaterial({ color: hex });
+    const lm = hex => paintedPBR(hex);
 
     if (def.id === 'stimpack') {
       // Stim pack: orange syringe — cylinder body + plunger + needle
       const s = def.scale;
       const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.08 * s, 0.08 * s, 0.38 * s, 10),
-        new THREE.MeshLambertMaterial({ color: def.color, transparent: true, opacity: 0.85 }));
+        paintedPBR(def.color, { transparent: true, opacity: 0.85 }));
       barrel.castShadow = true; this.root.add(barrel);
       // Plunger cap (top)
       const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.10 * s, 0.10 * s, 0.06 * s, 10), lm(0xcc3300));
@@ -67,26 +68,26 @@ class HealthPickup {
       const s = def.scale;
       const disc = new THREE.Mesh(
         new THREE.CylinderGeometry(0.30 * s, 0.30 * s, 0.07 * s, 8),
-        new THREE.MeshLambertMaterial({ color: 0x8b6914 })
+        paintedPBR(0x8b6914, { rough: 0.45, metal: 0.85 })
       );
       disc.castShadow = true;
       this.root.add(disc);
       const face = new THREE.Mesh(
         new THREE.CylinderGeometry(0.28 * s, 0.28 * s, 0.02 * s, 8),
-        new THREE.MeshLambertMaterial({ color: 0xd4a017 })
+        paintedPBR(0xd4a017, { rough: 0.32, metal: 0.95 })
       );
       face.position.y = 0.045 * s;
       this.root.add(face);
       const ring = new THREE.Mesh(
         new THREE.TorusGeometry(0.20 * s, 0.028 * s, 6, 8),
-        new THREE.MeshLambertMaterial({ color: 0xffcc44 })
+        paintedPBR(0xffcc44, { rough: 0.28, metal: 0.95 })
       );
       ring.rotation.x = Math.PI / 2;
       ring.position.y = 0.05 * s;
       this.root.add(ring);
       const bolt = new THREE.Mesh(
         new THREE.CylinderGeometry(0.055 * s, 0.055 * s, 0.09 * s, 6),
-        new THREE.MeshLambertMaterial({ color: 0xffe566 })
+        paintedPBR(0xffe566, { rough: 0.30, metal: 0.95 })
       );
       bolt.position.y = 0.05 * s;
       this.root.add(bolt);
@@ -96,7 +97,7 @@ class HealthPickup {
       const s = def.scale;
       const sphere = new THREE.Mesh(
         new THREE.SphereGeometry(0.28 * s, 12, 8),
-        new THREE.MeshLambertMaterial({ color: def.color, transparent: true, opacity: 0.9 })
+        paintedPBR(def.color, { transparent: true, opacity: 0.9, rough: 0.15, metal: 0.3 })
       );
       sphere.castShadow = true;
       this.root.add(sphere);

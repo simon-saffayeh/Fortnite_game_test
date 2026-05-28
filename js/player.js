@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { buildGunModel } from './weapons.js';
+import { paintedPBR } from './materials.js';
 
 const MOVE_SPEED   = 8;
 const SPRINT_SPEED = 16;
@@ -61,7 +62,7 @@ export class Player {
     this.body = new THREE.Group();
     this.root.add(this.body);
 
-    const lm  = hex => new THREE.MeshLambertMaterial({ color: hex });
+    const lm  = hex => paintedPBR(hex);
     const box = (w, h, d, hex, px, py, pz) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
       m.position.set(px, py, pz);

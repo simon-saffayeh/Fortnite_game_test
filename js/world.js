@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Sky } from 'three/addons/objects/Sky.js';
+import { Graphics } from './graphics.js';
+import { paintedPBR, polymerPBR } from './materials.js';
 
 // ── Seeded PRNG (LCG) — for reproducible tree/prop/cloud placement ───────────
 const WORLD_SEED = 42;
@@ -171,8 +174,9 @@ class StaticCollider {
 }
 
 export class World {
-  constructor(scene) {
+  constructor(scene, renderer = null) {
     this.scene = scene;
+    this.renderer = renderer;          // required for PMREM bake; null skips IBL
     this.size = 800;
     this.heightmap = null;
     this.resolution = 256;
@@ -192,61 +196,138 @@ export class World {
     this._buildTrees();
     this._buildStructures();
     this._buildProps();
+    // Final pass: walk the scene graph and swap every plain Lambert material
+    // for a cached PBR equivalent so structures/trees/props pick up real
+    // specular response from the baked sky envMap. ShaderMaterial (terrain,
+    // water) and glTF-imported materials are skipped.
+    this._promoteMaterialsToPBR();
+  }
+
+  _promoteMaterialsToPBR() {
+    if (!Graphics.pbrEnabled) return;
+    const upgrade = (mat) => {
+      if (!mat || !mat.isMeshLambertMaterial) return mat;
+      if (mat.map || mat.normalMap) return mat;   // textured (glTF) — leave alone
+      return paintedPBR(mat.color.getHex(), {
+        emissive:          mat.emissive ? mat.emissive.getHex() : 0x000000,
+        emissiveIntensity: mat.emissiveIntensity ?? 1.0,
+        transparent:       mat.transparent,
+        opacity:           mat.opacity,
+        side:              mat.side,
+      });
+    };
+    this.scene.traverse(obj => {
+      if (!obj.isMesh && !obj.isInstancedMesh) return;
+      const m = obj.material;
+      if (Array.isArray(m)) obj.material = m.map(upgrade);
+      else                  obj.material = upgrade(m);
+    });
   }
 
   // ── Sky ─────────────────────────────────────────────────────────────
   _buildSky() {
-    // Gradient sky using a large sphere with vertex colors
+    // HIGH/MEDIUM/ULTRA: physically-based atmospheric Sky from three/addons.
+    // LOW: the original cheap inverted-sphere gradient (no per-pixel cost).
+    if (Graphics.skyShaderEnabled) {
+      this._buildSkyShader();
+    } else {
+      this._buildSkyGradient();
+    }
+    // Clouds layer is preset-gated (cloudCount). Skip entirely on extreme low.
+    if (Graphics.cloudCount > 0) this._buildClouds();
+  }
+
+  // Original cheap path — vertex-coloured sphere + sun disc + glow.
+  _buildSkyGradient() {
     const geo = new THREE.SphereGeometry(1800, 32, 16);
-    geo.scale(-1, 1, 1); // invert normals
+    geo.scale(-1, 1, 1);
 
     const colors = [];
     const positions = geo.attributes.position;
     for (let i = 0; i < positions.count; i++) {
       const y = positions.getY(i);
-      const t = (y + 1800) / 3600; // 0 = bottom, 1 = top
-      // horizon: warm orange/pink → zenith: deep blue
+      const t = (y + 1800) / 3600;
       const top    = new THREE.Color(0x1a3a6b);
       const mid    = new THREE.Color(0x5b9bd5);
       const horiz  = new THREE.Color(0xf4a261);
       let c;
-      if (t > 0.5) {
-        c = mid.clone().lerp(top, (t - 0.5) * 2);
-      } else {
-        c = horiz.clone().lerp(mid, t * 2);
-      }
+      if (t > 0.5) c = mid.clone().lerp(top, (t - 0.5) * 2);
+      else         c = horiz.clone().lerp(mid, t * 2);
       colors.push(c.r, c.g, c.b);
     }
     geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-
-    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide });
-    const sky = new THREE.Mesh(geo, mat);
+    const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      vertexColors: true, side: THREE.BackSide,
+    }));
     this.scene.add(sky);
 
-    // Sun disc
     const sunGeo = new THREE.CircleGeometry(40, 32);
-    const sunMat = new THREE.MeshBasicMaterial({ color: 0xfffde0 });
-    const sun = new THREE.Mesh(sunGeo, sunMat);
+    const sun = new THREE.Mesh(sunGeo, new THREE.MeshBasicMaterial({ color: 0xfffde0 }));
     sun.position.set(600, 800, -1200);
     this.scene.add(sun);
 
-    // Sun glow
-    const glowGeo = new THREE.CircleGeometry(80, 32);
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffd580, transparent: true, opacity: 0.2 });
-    const glow = new THREE.Mesh(glowGeo, glowMat);
+    const glow = new THREE.Mesh(
+      new THREE.CircleGeometry(80, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffd580, transparent: true, opacity: 0.2 }),
+    );
     glow.position.set(600, 800, -1200.5);
     this.scene.add(glow);
+  }
 
-    // Clouds
-    this._buildClouds();
+  // Atmospheric Sky shader + PMREM-baked environment for IBL. Sun direction
+  // is aligned with the directional light in _buildLights so highlights match
+  // shadow direction. PMREM bake is one-time on world load (~80 ms).
+  _buildSkyShader() {
+    // Sun direction matches the existing directional light at (200, 400, -300).
+    // Compute elevation/azimuth from that vector so terrain + Sky agree.
+    const sunWorld = new THREE.Vector3(200, 400, -300);
+    const sunDir   = sunWorld.clone().normalize();
+    this._sunDir   = sunDir.clone();
+
+    const sky = new Sky();
+    sky.scale.setScalar(450000);
+    const u = sky.material.uniforms;
+    u.turbidity.value        = 6.0;
+    u.rayleigh.value         = 1.6;
+    u.mieCoefficient.value   = 0.006;
+    u.mieDirectionalG.value  = 0.82;
+    u.sunPosition.value.copy(sunDir);
+    this.scene.add(sky);
+    this._sky = sky;
+
+    // Background sample of the sky drives ambient fallback when scene.environment
+    // is unavailable (e.g. envMap bake skipped). Cheap colour pick at horizon.
+    this.scene.background = new THREE.Color(0x9ec8e8);
+
+    // PMREM bake — converts the sky render into a roughness-prefiltered env
+    // map used by every MeshStandardMaterial for IBL (image-based lighting).
+    // Without this PBR materials look flat/grey indoors.
+    if (Graphics.envMapEnabled && this.renderer) {
+      const pmrem = new THREE.PMREMGenerator(this.renderer);
+      pmrem.compileEquirectangularShader();
+      // Render the sky into a small cubemap and prefilter for roughness mips.
+      // Using `fromScene` with just the sky group keeps the bake fast and
+      // avoids picking up unfinished terrain colour.
+      const skyOnlyScene = new THREE.Scene();
+      const skyClone = sky.clone();
+      skyClone.material = sky.material;       // share uniforms
+      skyOnlyScene.add(skyClone);
+      const envRT = pmrem.fromScene(skyOnlyScene, 0.04);
+      this.scene.environment = envRT.texture;
+      this._envMap = envRT.texture;
+      pmrem.dispose();
+    }
   }
 
   _buildClouds() {
     const rng = this._rng;
     const cloudGeo = new THREE.SphereGeometry(1, 7, 5);
+    // Clouds stay Lambert-cheap regardless of preset — PBR on clouds would
+    // pick up sun specular and look like wet glass at low altitude.
     const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.88 });
 
-    for (let i = 0; i < 24; i++) {
+    const cloudCount = Graphics.cloudCount ?? 24;
+    for (let i = 0; i < cloudCount; i++) {
       const group = new THREE.Group();
       const puffs = 3 + Math.floor(rng() * 4);
       for (let p = 0; p < puffs; p++) {
@@ -276,19 +357,25 @@ export class World {
 
   // ── Lights ──────────────────────────────────────────────────────────
   _buildLights() {
-    // Slightly lifted ambient/sky compared to baseline so shadows stay
-    // colored rather than crushed-black, without the overcooked oversaturated
-    // look. Sun retains its original warm tone.
-    const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, 1.00);
+    // When PBR + IBL are active, ambient + hemi contribute on TOP of the
+    // baked envMap; without dialling them down the scene blows out. On LOW
+    // (no IBL) keep the original warmer values so shading stays the same.
+    const iblActive = Graphics.envMapEnabled && Graphics.pbrEnabled;
+    const hemiInt   = iblActive ? 0.45 : 1.00;
+    const ambInt    = iblActive ? 0.20 : 0.60;
+    const sunInt    = iblActive ? 2.30 : 2.60;
+
+    const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, hemiInt);
     this.scene.add(hemi);
 
-    const ambient = new THREE.AmbientLight(0xbcd6ee, 0.60);
+    const ambient = new THREE.AmbientLight(0xbcd6ee, ambInt);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xfff1c8, 2.6);
+    const sun = new THREE.DirectionalLight(0xfff1c8, sunInt);
     sun.position.set(200, 400, -300);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.castShadow = Graphics.shadowsEnabled;
+    const smap = Graphics.shadowMapSize ?? 1024;
+    sun.shadow.mapSize.set(smap, smap);
     sun.shadow.camera.near = 1;
     sun.shadow.camera.far = 750;
     // Tight ortho — the shadow camera now follows the player (see
@@ -607,7 +694,8 @@ export class World {
     const buckets = { trunk: [], leaf1: [], leaf2: [], palm: [] };
     const treeMat = new THREE.Matrix4();
 
-    for (let attempt = 0; attempt < 600; attempt++) {
+    const treeAttempts = Graphics.treeAttempts ?? 600;
+    for (let attempt = 0; attempt < treeAttempts; attempt++) {
       const x = (rng() - 0.5) * S * 0.78;
       const z = (rng() - 0.5) * S * 0.78;
       const h = this._getHeight(x, z);

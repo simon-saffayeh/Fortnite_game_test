@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR } from './materials.js';
 
 // ── Spawn points for up to 20 players — POI regions + mid-map + edges ──
 // Each point is on flat reachable terrain, spaced to avoid spawn-clusters.
@@ -60,13 +61,9 @@ export class RemotePlayer {
 
     // Per-instance material cache — share materials across same-color parts so
     // a 25-mesh character has ~6 materials instead of 25. Materials, not meshes,
-    // dominate draw-call cost in three.js.
-    const matCache = new Map();
-    const matFor = hex => {
-      let m = matCache.get(hex);
-      if (!m) { m = new THREE.MeshLambertMaterial({ color: hex }); matCache.set(hex, m); }
-      return m;
-    };
+    // dominate draw-call cost in three.js. paintedPBR() also caches globally,
+    // so a remote player and the local player reuse the same hex-keyed PBR.
+    const matFor = hex => paintedPBR(hex);
     const box = (w, h, d, hex, px, py, pz) => {
       const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), matFor(hex));
       m.position.set(px, py, pz);
@@ -174,7 +171,7 @@ export class RemotePlayer {
     const chute = new THREE.Group();
     const canopy = new THREE.Mesh(
       new THREE.SphereGeometry(2.6, 16, 9, 0, Math.PI * 2, 0, Math.PI * 0.5),
-      new THREE.MeshLambertMaterial({ color: 0xcc4433, side: THREE.DoubleSide })
+      paintedPBR(0xcc4433, { side: THREE.DoubleSide, rough: 0.9 })
     );
     canopy.position.y = 4.4;
     chute.add(canopy);

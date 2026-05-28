@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR } from './materials.js';
 
 // ── Deploy phase: ride the battle bus, jump out, skydive, parachute, land ─────
 // Fortnite-style match intro. While active, this controller fully owns the
@@ -587,7 +588,7 @@ export class DeployController {
 
   _buildBus() {
     const bus = new THREE.Group();
-    const lm  = hex => new THREE.MeshLambertMaterial({ color: hex });
+    const lm  = hex => paintedPBR(hex);
 
     // Body (long axis along Z so it aligns with travel direction)
     const body = new THREE.Mesh(new THREE.BoxGeometry(7, 3.4, 17), lm(0x2f6fc4));
@@ -643,8 +644,8 @@ export class DeployController {
       const geo = new THREE.SphereGeometry(
         RADIUS, 6, 10, phiStart, phiLen, 0, Math.PI * 0.5
       );
-      const mat = new THREE.MeshLambertMaterial({
-        color: colors[i % 2], side: THREE.DoubleSide, emissive: 0x080808,
+      const mat = paintedPBR(colors[i % 2], {
+        side: THREE.DoubleSide, emissive: 0x080808, rough: 0.85,
       });
       const panel = new THREE.Mesh(geo, mat);
       panel.position.y = Y;
@@ -653,14 +654,14 @@ export class DeployController {
     // Crown disc for a clean top + seam ring along the rim
     const crown = new THREE.Mesh(
       new THREE.CircleGeometry(0.35, 16),
-      new THREE.MeshLambertMaterial({ color: 0xdddddd })
+      paintedPBR(0xdddddd, { rough: 0.7 })
     );
     crown.rotation.x = -Math.PI / 2;
     crown.position.y = Y + RADIUS - 0.02;
     chute.add(crown);
     const rim = new THREE.Mesh(
       new THREE.TorusGeometry(RADIUS - 0.05, 0.04, 6, 32),
-      new THREE.MeshLambertMaterial({ color: 0x222222 })
+      paintedPBR(0x222222, { rough: 0.55, metal: 0.5 })
     );
     rim.rotation.x = Math.PI / 2;
     rim.position.y = Y;

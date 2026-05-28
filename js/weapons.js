@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR, metalPBR, polymerPBR } from './materials.js';
 
 // ── Weapon definitions ───────────────────────────────────────────────────────
 // Each weapon is locked to exactly one rarity tier.
@@ -163,7 +164,17 @@ export function buildGunModel(def, scale = 1) {
 
 function _buildGunModelRaw(def, scale = 1) {
   const g = new THREE.Group();
-  const m = hex => new THREE.MeshLambertMaterial({ color: hex });
+  // Heuristic: dark + achromatic = brushed metal (barrels, slides, triggers);
+  // everything else gets polymer/paint. Saves us tagging each call site as
+  // metal/polymer while still giving the right specular response per part.
+  const m = hex => {
+    const r = (hex >> 16) & 0xff, gC = (hex >> 8) & 0xff, b = hex & 0xff;
+    const mn = Math.min(r, gC, b), mx = Math.max(r, gC, b);
+    const isGrey = mx - mn < 32;            // achromatic
+    const isDark = (r + gC + b) < 480;      // not white/light
+    if (isGrey && isDark) return metalPBR(hex);
+    return polymerPBR(hex);
+  };
   const box = (w, h, d, hex, px, py, pz) => {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m(hex));
     mesh.position.set(px, py, pz);

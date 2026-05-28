@@ -963,6 +963,24 @@ body {
 .diff-btn[data-diff="hard"].active   { background: #ef4444; color: #000; border-color: #ef4444; box-shadow: 0 0 14px rgba(239,68,68,0.45); }
 .diff-btn[data-diff="expert"].active { background: #a855f7; color: #fff; border-color: #a855f7; box-shadow: 0 0 14px rgba(168,85,247,0.55); }
 
+/* ── Graphics quality picker (home screen options) ─────────────────────── */
+.quality-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+.quality-btn {
+  border: 2px solid rgba(148,163,184,0.3);
+  background: rgba(15,23,42,0.6);
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 11px; font-weight: 800; letter-spacing: 1.5px;
+  cursor: pointer; transition: all 0.15s;
+  font-family: inherit;
+}
+.quality-btn:hover { background: rgba(30,41,59,0.85); color: #fff; }
+.quality-btn[data-quality="low"].active    { background: #64748b; color: #000; border-color: #64748b; box-shadow: 0 0 12px rgba(100,116,139,0.4); }
+.quality-btn[data-quality="medium"].active { background: #22d3ee; color: #000; border-color: #22d3ee; box-shadow: 0 0 12px rgba(34,211,238,0.5); }
+.quality-btn[data-quality="high"].active   { background: #f59e0b; color: #000; border-color: #f59e0b; box-shadow: 0 0 12px rgba(245,158,11,0.5); }
+.quality-btn[data-quality="ultra"].active  { background: #a855f7; color: #fff; border-color: #a855f7; box-shadow: 0 0 14px rgba(168,85,247,0.6); }
+
 /* ── Supply-drop screen-edge waypoints ─────────────────────────────────── */
 .drop-waypoint {
   position: absolute;

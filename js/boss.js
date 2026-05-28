@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WEAPON_DEFS, WeaponPickup } from './weapons.js';
+import { paintedPBR } from './materials.js';
 
 // ── Ms. Franks (Frank's Jail boss) ───────────────────────────────────────
 //
@@ -201,12 +202,11 @@ export class MsFranksBoss {
     this.root = new THREE.Group();
     this.scene.add(this.root);
 
-    const matCache = new Map();
-    const lm = hex => {
-      let m = matCache.get(hex);
-      if (!m) { m = new THREE.MeshLambertMaterial({ color: hex }); matCache.set(hex, m); }
-      return m;
-    };
+    // paintedPBR() caches globally by (color, opts), so we don't need a
+    // per-boss matCache — same call with same hex returns the same instance.
+    const lm = hex => paintedPBR(hex).clone();
+    // .clone() because the hit-flash code below mutates .color per mesh.
+    // Cloning still reuses the shader program; only the uniform set diverges.
     const box = (w, h, d, hex, px, py, pz) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
       mesh.position.set(px, py, pz);
@@ -304,10 +304,14 @@ export class MsFranksBoss {
     this._weapon = weapon;
     this.root.add(weapon);
 
-    // Hit-flash tracking — every Lambert mesh, so the whole boss flashes white.
+    // Hit-flash tracking — every painted mesh (Lambert OR Standard PBR), so
+    // the whole boss flashes white on damage. Must accept both since
+    // paintedPBR() returns either depending on Graphics preset.
     this._meshes = [];
     this.root.traverse(o => {
-      if (o.isMesh && o.material.isMeshLambertMaterial) this._meshes.push(o);
+      if (!o.isMesh || !o.material) return;
+      const mt = o.material;
+      if (mt.isMeshLambertMaterial || mt.isMeshStandardMaterial) this._meshes.push(o);
     });
     this._origColors = this._meshes.map(m => m.material.color.getHex());
   }

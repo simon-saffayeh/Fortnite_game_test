@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR } from './materials.js';
 
 const TOTAL_WAVES      = 10;
 const INTERMISSION_SEC = 15;
@@ -90,7 +91,7 @@ export class Zombie {
     }
     this.scene.add(this.root);
 
-    const lm = hex => new THREE.MeshLambertMaterial({ color: hex });
+    const lm = hex => paintedPBR(hex);
     const box = (w, h, d, hex, px, py, pz, parent) => {
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lm(hex));
       mesh.position.set(px, py, pz);

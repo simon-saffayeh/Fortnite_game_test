@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { paintedPBR } from './materials.js';
 import { AMMO_PILE_AMOUNT } from './weapons.js';
 
 // ── Visual styling per ammo type ─────────────────────────────────────────
@@ -33,14 +34,14 @@ class AmmoPickup {
     g.position.set(position.x, this._baseY, position.z);
 
     // Crate body — small wooden box w/ banded lid in the ammo-type color.
-    const wood = new THREE.MeshLambertMaterial({ color: 0x5a3c1e });
+    const wood = paintedPBR(0x5a3c1e, { rough: 0.78 });
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.4, 0.4), wood);
     body.castShadow = true;
     g.add(body);
 
     const lid = new THREE.Mesh(
       new THREE.BoxGeometry(0.58, 0.1, 0.43),
-      new THREE.MeshLambertMaterial({ color: visual.color }),
+      paintedPBR(visual.color, { rough: 0.5, metal: 0.3 }),
     );
     lid.position.y = 0.22;
     g.add(lid);
@@ -48,8 +49,8 @@ class AmmoPickup {
     // Stencilled label band — emissive so it pops against terrain.
     const stamp = new THREE.Mesh(
       new THREE.BoxGeometry(0.4, 0.18, 0.42),
-      new THREE.MeshLambertMaterial({
-        color: visual.color, emissive: visual.color, emissiveIntensity: 0.45,
+      paintedPBR(visual.color, {
+        emissive: visual.color, emissiveIntensity: 0.45,
       }),
     );
     stamp.position.y = -0.02;
