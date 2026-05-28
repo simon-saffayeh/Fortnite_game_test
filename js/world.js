@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { Sky } from 'three/addons/objects/Sky.js';
 import { Graphics } from './graphics.js';
 import { paintedPBR, polymerPBR } from './materials.js';
 
@@ -225,23 +224,19 @@ export class World {
   }
 
   // ── Sky ─────────────────────────────────────────────────────────────
+  // One sky path for every preset: a vertex-coloured gradient sphere plus a
+  // soft sprite-based sun. The three/addons Sky shader was simulating real
+  // atmospheric scattering and was impossible to tune for a stylized game
+  // (its physics-accurate sun disc dominated everything). This setup is
+  // cheap, looks the same on LOW and ULTRA, and never produces overexposure.
   _buildSky() {
-    // HIGH/MEDIUM/ULTRA: physically-based atmospheric Sky from three/addons.
-    // LOW: the original cheap inverted-sphere gradient (no per-pixel cost).
-    if (Graphics.skyShaderEnabled) {
-      this._buildSkyShader();
-    } else {
-      this._buildSkyGradient();
-    }
-    // Clouds layer is preset-gated (cloudCount). Skip entirely on extreme low.
+    this._buildSkyGradient();
+    this._buildSpriteSun();
     if (Graphics.cloudCount > 0) this._buildClouds();
   }
 
-  // Cheap path — vertex-coloured gradient sphere. No sun disc or glow ring;
-  // the previous version had a flat CircleGeometry sun at (600, 800, -1200)
-  // plus an 80-unit-radius outer glow which bloomed into a very visible
-  // bright ring against the now-dim sky. Direct sunlight still comes from
-  // the DirectionalLight in _buildLights, so the world stays lit.
+  // Vertex-coloured gradient sphere. Inside-out so we see the painted face.
+  // No sun in this path — that's the sprite's job.
   _buildSkyGradient() {
     const geo = new THREE.SphereGeometry(1800, 32, 16);
     geo.scale(-1, 1, 1);
@@ -266,107 +261,51 @@ export class World {
     this.scene.add(sky);
   }
 
-  // Atmospheric Sky shader + PMREM-baked environment for IBL. Sun direction
-  // is aligned with the directional light in _buildLights so highlights match
-  // shadow direction. PMREM bake is one-time on world load (~80 ms).
-  _buildSkyShader() {
-    // Sun direction matches the existing directional light at (200, 400, -300).
-    // Compute elevation/azimuth from that vector so terrain + Sky agree.
+  // Sprite-based sun: a single billboard quad with a procedurally drawn
+  // radial gradient (smooth Gaussian falloff). Always faces the camera, so
+  // there's no disc-edge artifact at any angle. The colour fades to fully
+  // transparent before reaching the sprite edge, so there's no hard ring.
+  // Positioned at sunDir × 1500 (well within the 2000-unit camera far plane).
+  _buildSpriteSun() {
     const sunWorld = new THREE.Vector3(200, 400, -300);
     const sunDir   = sunWorld.clone().normalize();
     this._sunDir   = sunDir.clone();
 
-    const sky = new Sky();
-    sky.scale.setScalar(450000);
-    const u = sky.material.uniforms;
-    // Soft late-afternoon atmosphere — keeps the sky readable as sky without
-    // blowing past the bloom threshold or dumping IBL energy. Each knob
-    // contributes:
-    //   rayleigh    — overall sky scattering brightness (blue channel dominant)
-    //   turbidity   — haze around the sun, affects both sky and sun-disc spread
-    //   mie*        — directional/glow scattering toward the sun
-    u.turbidity.value        = 1.0;
-    u.rayleigh.value         = 0.35;
-    // Mie controls the sun-glow halo. Earlier passes kept producing a
-    // bright ring around the sun, so mie is pushed near-zero: the sun
-    // disc is barely visible and there's no halation at all. Direct sun
-    // illumination still comes from the DirectionalLight, which is
-    // separate from the Sky shader.
-    u.mieCoefficient.value   = 0.0001;
-    u.mieDirectionalG.value  = 0.40;
-    u.sunPosition.value.copy(sunDir);
+    // Procedural soft-disc texture. 128 px is plenty — sprite is small on
+    // screen and the gradient is the whole point (no high-frequency detail).
+    const size = 128;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
+    // Warm center → warm halo → fully transparent at the edge. Keeping the
+    // brightest stop below the bloom threshold (post-tone-mapping) avoids
+    // any halo blooming, which is exactly what produced the giant ring
+    // artifact in earlier attempts.
+    grad.addColorStop(0.00, 'rgba(255, 246, 220, 1.00)');
+    grad.addColorStop(0.18, 'rgba(255, 220, 160, 0.90)');
+    grad.addColorStop(0.45, 'rgba(255, 180, 110, 0.45)');
+    grad.addColorStop(0.75, 'rgba(255, 150,  90, 0.12)');
+    grad.addColorStop(1.00, 'rgba(255, 130,  70, 0.00)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
 
-    // Patch the sun-disc multiplier inside the Sky fragment shader to 0.
-    // The three/addons Sky uses `sunE * 19000.0 * Fex * sundisk` which is
-    // physically accurate (you're looking at the actual sun) and overwhelms
-    // everything else. Killing the disc here, then adding our own soft sun
-    // mesh below gives a controllable, screenshot-friendly result.
-    const fs = sky.material.fragmentShader;
-    if (typeof fs === 'string' && fs.includes('19000.0')) {
-      sky.material.fragmentShader = fs.replace('19000.0', '0.0');
-      sky.material.needsUpdate = true;
-    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
 
-    this.scene.add(sky);
-    this._sky = sky;
-
-    // ── Soft custom sun ────────────────────────────────────────────────
-    // Three stacked spheres at the sun direction: a small bright core +
-    // two diffuse halo layers. Distances are well inside the camera far
-    // plane (2000) but far enough to read as "in the sky" through fog.
-    // Colors stay warm but well below the bloom threshold (after tone
-    // mapping) so the sun reads as glowing without producing the giant
-    // bright ring artifact the raw Sky-shader disc produced.
-    const sunPos = sunDir.clone().multiplyScalar(1500);
-    const sunGroup = new THREE.Group();
-    sunGroup.position.copy(sunPos);
-    // Sun mesh stays in front of distance fog by hiding fog interaction.
-    const sunCore = new THREE.Mesh(
-      new THREE.SphereGeometry(18, 16, 12),
-      new THREE.MeshBasicMaterial({ color: 0xfff2d8, fog: false }),
-    );
-    const sunHalo = new THREE.Mesh(
-      new THREE.SphereGeometry(45, 18, 14),
-      new THREE.MeshBasicMaterial({
-        color: 0xffd8a0, transparent: true, opacity: 0.32,
-        depthWrite: false, fog: false,
-      }),
-    );
-    const sunGlow = new THREE.Mesh(
-      new THREE.SphereGeometry(95, 20, 14),
-      new THREE.MeshBasicMaterial({
-        color: 0xffb070, transparent: true, opacity: 0.10,
-        depthWrite: false, fog: false,
-      }),
-    );
-    sunGroup.add(sunGlow);
-    sunGroup.add(sunHalo);
-    sunGroup.add(sunCore);
-    this.scene.add(sunGroup);
-    this._sunMesh = sunGroup;
-
-    // Background sample of the sky drives ambient fallback when scene.environment
-    // is unavailable (e.g. envMap bake skipped). Cheap colour pick at horizon.
-    this.scene.background = new THREE.Color(0x9ec8e8);
-
-    // PMREM bake — converts the sky render into a roughness-prefiltered env
-    // map used by every MeshStandardMaterial for IBL (image-based lighting).
-    // Without this PBR materials look flat/grey indoors.
-    if (Graphics.envMapEnabled && this.renderer) {
-      const pmrem = new THREE.PMREMGenerator(this.renderer);
-      pmrem.compileEquirectangularShader();
-      // Render the sky into a small cubemap and prefilter for roughness mips.
-      // Using `fromScene` with just the sky group keeps the bake fast and
-      // avoids picking up unfinished terrain colour.
-      const skyOnlyScene = new THREE.Scene();
-      const skyClone = sky.clone();
-      skyClone.material = sky.material;       // share uniforms
-      skyOnlyScene.add(skyClone);
-      const envRT = pmrem.fromScene(skyOnlyScene, 0.04);
-      this.scene.environment = envRT.texture;
-      this._envMap = envRT.texture;
-      pmrem.dispose();
-    }
+    const mat = new THREE.SpriteMaterial({
+      map: tex,
+      transparent: true,
+      depthWrite: false,
+      fog: false,           // distance fog would eat our sun
+      // Normal blending — additive would push past the bloom threshold and
+      // re-create the halo problem. Normal keeps the sprite well-behaved.
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.copy(sunDir).multiplyScalar(1500);
+    sprite.scale.setScalar(180);   // world-units across — small in the sky
+    this.scene.add(sprite);
+    this._sunSprite = sprite;
   }
 
   _buildClouds() {
@@ -407,15 +346,13 @@ export class World {
 
   // ── Lights ──────────────────────────────────────────────────────────
   _buildLights() {
-    // When PBR + IBL are active, ambient + hemi contribute on TOP of the
-    // baked envMap; without dialling them down the scene blows out. On LOW
-    // (no IBL) keep the original warmer values so shading stays the same.
-    // These are aggressive on purpose — IBL already delivers wraparound
-    // sky+ground contribution, so hemi/ambient are mostly for tint.
-    const iblActive = Graphics.envMapEnabled && Graphics.pbrEnabled;
-    const hemiInt   = iblActive ? 0.20 : 1.00;
-    const ambInt    = iblActive ? 0.08 : 0.60;
-    const sunInt    = iblActive ? 1.80 : 2.60;
+    // Original pre-IBL balance, applied uniformly. The sky no longer feeds
+    // any energy into the scene (no PMREM bake) so we don't need the IBL
+    // compensation factors. These values were tuned and looked correct
+    // before we started the graphics overhaul.
+    const hemiInt   = 1.00;
+    const ambInt    = 0.60;
+    const sunInt    = 2.60;
 
     const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, hemiInt);
     this.scene.add(hemi);

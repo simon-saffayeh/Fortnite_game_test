@@ -523,11 +523,11 @@ class Game {
     this.renderer.shadowMap.enabled   = Graphics.shadowsEnabled;
     this.renderer.shadowMap.type      = THREE.PCFShadowMap;
     this.renderer.toneMapping         = THREE.ACESFilmicToneMapping;
-    // PBR + IBL adds significant ambient energy from the baked sky envMap.
-    // Stacking that on top of the original hemi/amb/sun budget overexposes
-    // the scene (whites everywhere, sky blowout). Drop exposure further when
-    // PBR is active — the loss is more than recovered by the IBL specular.
-    this.renderer.toneMappingExposure = Graphics.pbrEnabled ? 0.78 : 1.25;
+    // Lighting is back to its pre-overhaul intensities (no IBL bake), so
+    // exposure can sit close to the original 1.25. Small reduction with
+    // PBR active accounts for the extra specular response from
+    // MeshStandardMaterial vs MeshLambertMaterial.
+    this.renderer.toneMappingExposure = Graphics.pbrEnabled ? 1.10 : 1.25;
     this.renderer.outputColorSpace    = THREE.SRGBColorSpace;
   }
 
