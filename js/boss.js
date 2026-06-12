@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { WEAPON_DEFS, WeaponPickup } from './weapons.js';
 import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
+import { addOutline } from './outline.js';
 
 // ── Ms. Franks (Frank's Jail boss) ───────────────────────────────────────
 //
@@ -184,6 +185,7 @@ export class MsFranksBoss {
 
     this._buildModel();
     this._buildHealthBar();
+    addOutline(this.root, { width: 0.030 });   // boss gets a slightly chunkier outline
 
     // Initial position — terrain-snapped.
     const sy = this.world.getTerrainHeight(SPAWN_X, SPAWN_Z) + FOOT_OFFSET;

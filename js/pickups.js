@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { paintedPBR, boxGeo, polymerPBR, metalPBR } from './materials.js';
+import { addOutline } from './outline.js';
 
 const DEFS = {
   medkit:      { id: 'medkit',      label: 'Med Kit',      healHp: 50,  healShield: 0,  healArmour: 0,  color: 0x00ee66, scale: 0.9,  isConsumable: true, useTime: 3.0 },
@@ -131,6 +132,11 @@ class HealthPickup {
     // The glow shell + swirl band + ground disc carry the look on their own.
 
     scene.add(this.root);
+    // Outline filter: skip the ground-glow disc (it's flat and transparent).
+    addOutline(this.root, {
+      width: 0.012,
+      filter: (m) => !(m.material?.isMeshBasicMaterial && m.material?.transparent),
+    });
   }
 
   update(dt) {

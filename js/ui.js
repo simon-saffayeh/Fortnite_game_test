@@ -314,11 +314,8 @@ export class HUD {
     this._killFeed.prepend(entry);
     setTimeout(() => entry.remove(), 4000);
 
-    // First-blood banner: only the first kill of the match. Multi-kill
-    // banners cascade from later kills via the sliding window below.
-    if (this._kills === 1) {
-      this.showStreakBanner('FIRST BLOOD', 1);
-    }
+    // First-blood banner removed at user request — multi-kill banners
+    // below still fire normally for 2+ kills inside the streak window.
 
     // Multi-kill: keep only timestamps within the streak window, then
     // announce on 2+ kills in that window.
@@ -458,6 +455,17 @@ export class HUD {
     // Regular ADS keeps the crosshair visible (just tighter via _updateCrosshair).
     if (ch) ch.style.opacity = (active && sniper) ? '0' : '1';
     if (this._scopeEl) this._scopeEl.classList.toggle('active', active && sniper);
+    // Lightweight ADS vignette — soft darkening at edges so the eye is drawn
+    // to the centre of the screen. Lazy-create on first use so HUD setup
+    // doesn't have to know about it. Visible for ALL ADS (sniper layers
+    // its own reticle on top).
+    if (!this._adsVignetteEl) {
+      this._adsVignetteEl = document.createElement('div');
+      this._adsVignetteEl.id = 'ads-vignette';
+      document.body.appendChild(this._adsVignetteEl);
+    }
+    this._adsVignetteEl.classList.toggle('active', active);
+    this._adsVignetteEl.classList.toggle('scoped', active && sniper);
   }
 
   // ── Supply-drop screen-edge waypoints ────────────────────────────────────
@@ -692,22 +700,6 @@ export class HUD {
         ctx.fillStyle = 'rgba(80,40,220,0.06)'; ctx.fill();
       }
     }
-
-    // Hot-zone ring — dashed gold circle showing the Epic/Legendary loot area.
-    // Centre matches _ZONE_CX/_ZONE_CZ in weapons.js; radii match zone thresholds.
-    {
-      const hc  = toMM(18, -12);
-      ctx.save();
-      ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = 'rgba(255,210,50,0.42)';
-      ctx.lineWidth   = 1;
-      ctx.beginPath(); ctx.arc(hc.x, hc.y, 70 * mmSc, 0, Math.PI * 2); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,170,30,0.20)';
-      ctx.beginPath(); ctx.arc(hc.x, hc.y, 150 * mmSc, 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-    }
-
 
     // POI labels (smaller font for minimap)
     if (this.world.pois) {

@@ -5,14 +5,34 @@ const _forward  = new THREE.Vector3(0, 0, 1); // cylinder's local long axis afte
 
 class Bullet {
   constructor(scene) {
-    // Cylinder along Z, thin and elongated — looks like a bullet tracer
-    const geo = new THREE.CylinderGeometry(0.022, 0.022, 0.42, 5);
+    // Main tracer cylinder — longer + slightly thicker than before so it
+    // reads as a streak even at 100m+. The faction-based recolor in reset()
+    // still controls the tracer hue.
+    const geo = new THREE.CylinderGeometry(0.04, 0.025, 2.2, 6);
     geo.rotateX(Math.PI / 2); // long axis now along local Z
 
     this.mat  = new THREE.MeshBasicMaterial({ color: 0xffee44 });
     this.mesh = new THREE.Mesh(geo, this.mat);
     this.mesh.visible = false;
     scene.add(this.mesh);
+
+    // Trail mesh — a fatter, semi-transparent cylinder positioned BEHIND
+    // the main bullet so each shot has a visible tail. Uses additive
+    // blending so it brightens against any background. Centered slightly
+    // behind the head so it streams from the muzzle outward.
+    const trailGeo = new THREE.CylinderGeometry(0.10, 0.02, 4.8, 8);
+    trailGeo.rotateX(Math.PI / 2);
+    trailGeo.translate(0, 0, 2.4);   // shift backward (negative facing dir)
+    this.trailMat = new THREE.MeshBasicMaterial({
+      color: 0xffee44,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.trail = new THREE.Mesh(trailGeo, this.trailMat);
+    this.trail.visible = false;
+    this.mesh.add(this.trail);
 
     this.active      = false;
     this.position    = new THREE.Vector3();
@@ -47,6 +67,10 @@ class Bullet {
     const isFlame    = this.def?.id === 'flamethrower';
     const isGrenade  = this.def?.id === 'grenadeLauncher';
     const isCrossbow = this.def?.id === 'crossbow';
+    // Big projectiles (bomb/flame/grenade/crossbow bolt) hide the streak
+    // trail — it looks silly behind a thrown bomb or arrow. Standard
+    // bullets get a faction-tinted trail behind them.
+    let showTrail = false;
     if (isBomb) {
       this.mat.color.setHex(0x111111);
       this.mesh.scale.setScalar(5);
@@ -62,9 +86,14 @@ class Bullet {
       this.mat.color.setHex(0xbb8833);
       this.mesh.scale.set(1.8, 1.8, 2.8);
     } else {
-      this.mat.color.setHex(this.faction === 'player' ? 0xffee44 : 0xff5522);
+      const tracerHex = this.faction === 'player' ? 0xffee44 : 0xff5522;
+      this.mat.color.setHex(tracerHex);
+      this.trailMat.color.setHex(tracerHex);
       this.mesh.scale.setScalar(1);
+      showTrail = true;
     }
+    this.trail.visible = showTrail;
+    this.trailMat.opacity = showTrail ? 0.45 : 0;
 
     this._bounces   = 0;
     this._fuseTimer = 0;
@@ -109,6 +138,10 @@ export class ProjectileSystem {
     this.onEnemyHit  = null;
     this.onPlayerHit = null;
     this.onExplosion = null; // (pos, defId) → void
+    // (pos, reverseDir) — fired when a bullet kills against terrain / wall /
+    // building so DecalSystem can paint a scorch mark. Not fired for
+    // soft-target hits (no decal on an enemy chest).
+    this.onImpactDecal = null;
 
     // Optional MsFranksManager — when set, player bullets and explosions
     // also test against the boss. Single-entity check so cost is negligible.
@@ -226,51 +259,82 @@ export class ProjectileSystem {
           if (b.def?.flamethrower) {
             particles.spawnBurst(b.position.clone(), { count: 5, color: 0xff5500, speed: 3, lifetime: 0.4, size: 0.18, gravity: -2 });
           } else {
-            // Dirt spray in opposite travel direction + dust cloud
+            // ── Terrain impact — dirt spray + bright grass flecks ──
+            // Brighter colors than realistic so it reads as Fortnite-cartoony.
             const impactDir = b.direction.clone().negate();
-            impactDir.y = Math.abs(impactDir.y) + 0.5; // bias upward
+            impactDir.y = Math.abs(impactDir.y) + 0.5;
             particles.spawnSparks(b.position.clone(), impactDir, {
-              count: 10, color: 0x886644, speed: 5, lifetime: 0.28, size: 0.09,
+              count: 12, color: 0x8a6a44, speed: 6, lifetime: 0.28, size: 0.10,
             });
             particles.spawnBurst(b.position.clone(), {
-              count: 8, color: 0xaa9966, speed: 2.0, lifetime: 0.35, size: 0.14, gravity: 4,
+              count: 10, color: 0xc8a972, speed: 2.5, lifetime: 0.38, size: 0.16, gravity: 4,
             });
+            // Bright green grass flecks — small but vivid, sells "grass got hit".
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 4, color: 0x66ee33, speed: 4, lifetime: 0.55, size: 0.06,
+            });
+            this.onImpactDecal?.(b.position.clone(), new THREE.Vector3(0, 1, 0));
           }
         }
         this._kill(b);
         continue;
       }
 
-      // Building collision (player-built structures)
+      // Building collision (player-built structures — wood/timber)
       if (this.buildingSystem) {
         if (this.buildingSystem.checkBullet(b.prevPosition, b.position, b.damage)) {
           if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
           if (b.def?.explosive) {
             this._explode(b, b.position.clone(), particles, player, enemyManager);
           } else if (particles) {
+            // ── Wood impact — bright yellow sparks + brown splinters + smoke ──
             const impactDir = b.direction.clone().negate();
             particles.spawnSparks(b.position.clone(), impactDir, {
-              count: 8, color: 0xcc9944, speed: 6, lifetime: 0.25, size: 0.08, spread: 0.65,
+              count: 10, color: 0xffd844, speed: 7, lifetime: 0.22, size: 0.08, spread: 0.65,
             });
-            particles.spawnSmoke(b.position.clone(), { count: 3, color: 0x888877, lifetime: 1.0, size: 0.4 });
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 8, color: 0x8c5a26, speed: 5, lifetime: 0.42, size: 0.09, spread: 0.7,
+            });
+            particles.spawnSmoke(b.position.clone(), { count: 3, color: 0x9a8866, lifetime: 1.0, size: 0.4 });
+            this.onImpactDecal?.(b.position.clone(), impactDir);
           }
           this._kill(b);
           continue;
         }
       }
 
-      // Static world structure collision (POI buildings, walls, etc.)
+      // Static world structure collision — POI buildings.
+      // Lightweight material heuristic: high impact (y > 6) likely a roof or
+      // upper wall of a tall stone building (Ancient Temple, mansion);
+      // low impact (y < 3) likely a wood cabin or palisade. Defaults to
+      // stone-chip read for ambiguous cases.
       if (this.world.staticCollider.checkBullet(b.prevPosition, b.position)) {
         if (b.def?.teleport) this._doTeleport(b, b.position.clone(), player, particles);
         if (b.def?.explosive) {
           this._explode(b, b.position.clone(), particles, player, enemyManager);
         } else if (particles) {
-          // Concrete/stone chip sparks + small smoke puff
           const impactDir = b.direction.clone().negate();
-          particles.spawnSparks(b.position.clone(), impactDir, {
-            count: 9, color: 0xccbbaa, speed: 5.5, lifetime: 0.22, size: 0.07, spread: 0.6,
-          });
-          particles.spawnSmoke(b.position.clone(), { count: 3, color: 0x999988, lifetime: 0.9, size: 0.35 });
+          const isLowWall = b.position.y < 3.0;
+          if (isLowWall) {
+            // Wood-cabin read — yellow sparks + brown splinters.
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 9, color: 0xffd844, speed: 6.5, lifetime: 0.22, size: 0.08, spread: 0.6,
+            });
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 6, color: 0x8c5a26, speed: 4, lifetime: 0.40, size: 0.08, spread: 0.7,
+            });
+            particles.spawnSmoke(b.position.clone(), { count: 3, color: 0x9a8866, lifetime: 0.9, size: 0.38 });
+          } else {
+            // Stone-chip read — gray chips + bright white dust burst.
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 10, color: 0xd8d2c4, speed: 6, lifetime: 0.22, size: 0.08, spread: 0.6,
+            });
+            particles.spawnSparks(b.position.clone(), impactDir, {
+              count: 6, color: 0x6a6a66, speed: 4, lifetime: 0.45, size: 0.10, spread: 0.55,
+            });
+            particles.spawnSmoke(b.position.clone(), { count: 4, color: 0xc0c0b8, lifetime: 1.0, size: 0.45 });
+          }
+          this.onImpactDecal?.(b.position.clone(), impactDir);
         }
         this._kill(b);
         continue;
@@ -412,6 +476,51 @@ export class ProjectileSystem {
       particles.spawnSmoke(pos.clone(), { count: 10, color: 0x555544, speed: 2.5, lifetime: 2.8, size: 0.9 });
       particles.spawnSmoke(pos.clone(), { count: 6,  color: 0x333322, speed: 1.5, lifetime: 3.5, size: 1.2 });
     }
+
+    // ── Multi-stage mesh effects ───────────────────────────────────────
+    // Flash sphere + ground shockwave ring, both reusing the existing
+    // _tempEffects tick logic (same flash/ring types as _nuclearExplosion,
+    // just smaller and shorter). Allocations are per-explosion which is
+    // fine — explosions are rare events (rocket/grenade impacts).
+    // 1. Quick bright flash
+    const flashGeo = new THREE.SphereGeometry(1, 12, 8);
+    const flashMat = new THREE.MeshBasicMaterial({
+      color: 0xfff0a0, transparent: true, opacity: 0.85,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    });
+    const flashM = new THREE.Mesh(flashGeo, flashMat);
+    flashM.position.copy(pos);
+    flashM.scale.setScalar(0.1);
+    this.scene.add(flashM);
+    this._tempEffects.push({
+      type: 'flash', mesh: flashM, mat: flashMat,
+      age: 0, duration: 0.28, maxR: radius * 0.55,
+    });
+
+    // 2. Ground shockwave ring
+    const ringGeo = new THREE.TorusGeometry(1, 0.18, 6, 36);
+    ringGeo.rotateX(Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xff8030, transparent: true, opacity: 0.75,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      side: THREE.DoubleSide,
+    });
+    const ringM = new THREE.Mesh(ringGeo, ringMat);
+    ringM.position.copy(pos);
+    ringM.position.y -= 0.5;     // sit near ground level
+    ringM.scale.setScalar(0.01);
+    this.scene.add(ringM);
+    this._tempEffects.push({
+      type: 'ring', mesh: ringM, mat: ringMat,
+      age: 0, duration: 0.65, maxR: radius * 1.25,
+    });
+
+    // Briefly punch the persistent explosion light too — same trick as the
+    // nuclear path uses, no light add/remove (avoids shader recompile).
+    this._explosionLight.position.copy(pos);
+    this._tempEffects.push({
+      type: 'light', light: this._explosionLight, age: 0, duration: 0.35, maxI: 6,
+    });
 
     const pp = player.getPosition();
     const pd = Math.sqrt((pp.x-pos.x)**2 + (pp.y+1-pos.y)**2 + (pp.z-pos.z)**2);

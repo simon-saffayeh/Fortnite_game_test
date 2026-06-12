@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
+import { addOutline } from './outline.js';
 
 const TOTAL_WAVES      = 10;
 const INTERMISSION_SEC = 15;
@@ -77,6 +78,7 @@ export class Zombie {
 
     this._buildModel(position);
     this._buildHealthBar();
+    addOutline(this.root, { width: 0.025 });
   }
 
   // ── Model ────────────────────────────────────────────────────────────────

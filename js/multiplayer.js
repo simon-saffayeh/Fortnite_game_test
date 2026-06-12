@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
+import { addOutline } from './outline.js';
 
 // ── Spawn points for up to 20 players — POI regions + mid-map + edges ──
 // Each point is on flat reachable terrain, spaced to avoid spawn-clusters.
@@ -53,6 +54,7 @@ export class RemotePlayer {
     this._buildModel();
     this._buildParachute();
     this._buildNameTag();
+    addOutline(this._torso, { width: 0.025 });
   }
 
   _buildModel() {

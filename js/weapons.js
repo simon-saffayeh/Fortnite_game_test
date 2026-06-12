@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { paintedPBR, metalPBR, polymerPBR, boxGeo } from './materials.js';
+import { addOutline } from './outline.js';
 
 // ── Weapon definitions ───────────────────────────────────────────────────────
 // Each weapon is locked to exactly one rarity tier.
@@ -66,7 +67,7 @@ export const WEAPON_DEFS = {
   },
   flamethrower: {
     id: 'flamethrower', name: 'Flamethrower',
-    damage: 6, fireRate: 0.07, bulletSpeed: 78, range: 44,
+    damage: 15, fireRate: 0.03, bulletSpeed: 78, range: 44,
     spread: 0.17, magSize: 80, reloadTime: 3.0, ammoType: 'rockets',
     rarityColor: 0xff6600, rarity: 'Rare', auto: true, pellets: 1,
     flamethrower: true,
@@ -98,20 +99,6 @@ export const WEAPON_DEFS = {
     damage: 68, fireRate: 0.70, bulletSpeed: 320, range: 230,
     spread: 0.010, magSize: 7, reloadTime: 1.9, ammoType: 'heavy',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
-  },
-  crossbow: {
-    id: 'crossbow', name: 'Crossbow',
-    damage: 98, fireRate: 1.1, bulletSpeed: 210, range: 290,
-    spread: 0.004, magSize: 1, reloadTime: 1.4, ammoType: 'heavy',
-    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
-    silent: true, gravity: 22,
-  },
-  silencedSMG: {
-    id: 'silencedSMG', name: 'Silenced SMG',
-    damage: 15, fireRate: 0.08, bulletSpeed: 330, range: 115,
-    spread: 0.040, magSize: 25, reloadTime: 1.7, ammoType: 'light',
-    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: true, pellets: 1,
-    silent: true,
   },
   huntingRifle: {
     id: 'huntingRifle', name: 'Hunting Rifle',
@@ -145,7 +132,7 @@ export const WEAPON_DEFS = {
   // empty, it's empty. NOT in RARITY_POOL or DROP_WEAPONS — boss-only loot.
   protractorBeam: {
     id: 'protractorBeam', name: 'Protractor Beam',
-    damage: 16, fireRate: 0.55, bulletSpeed: 280, range: 110,
+    damage: 90, fireRate: 0.55, bulletSpeed: 280, range: 110,
     spread: 0.26, magSize: 6, reloadTime: 2.6, ammoType: 'special',
     rarityColor: 0xff1111, rarity: 'Mythic', auto: false, pellets: 7,
   },
@@ -466,6 +453,13 @@ export class WeaponInstance {
    *                        from the inventory's shared pool.
    */
   constructor(def, init = {}) {
+    // Fail safe: an undefined def (e.g. a weapon id that doesn't exist in this
+    // client's WEAPON_DEFS, or a stale pickup) would throw on every property
+    // read below and kill the game. Fall back to the pistol instead.
+    if (!def) {
+      console.warn('[WeaponInstance] undefined weapon def — falling back to pistol');
+      def = WEAPON_DEFS.pistol;
+    }
     this.def          = def;
     this.ammo         = init.ammo != null ? init.ammo : def.magSize;
     // Special-type reserve (phaseRifle). Ignored for all other ammoTypes —
@@ -549,6 +543,13 @@ export class WeaponPickup {
    *                                  ammo. Omit for fresh world pickups.
    */
   constructor(scene, def, position, ammoState = null) {
+    // Fail safe: a malformed or version-skewed weapon id (e.g. from a remote
+    // supply-drop broadcast) can resolve to an undefined def. Falling back to
+    // the pistol keeps one bad pickup from throwing and killing the game loop.
+    if (!def) {
+      console.warn('[WeaponPickup] undefined weapon def — falling back to pistol');
+      def = WEAPON_DEFS.pistol;
+    }
     this.scene     = scene;
     this.def       = def;
     this.collected = false;
@@ -585,12 +586,16 @@ export class WeaponPickup {
     disc.position.y = -0.85;
     this.root.add(disc);
 
+    // (Loot beam removed at user request — kept ring + disc + spinning gun
+    // as the visual marker. The beam was too dominant in the scene.)
+
     // No per-pickup PointLight: with ~60 pickups that's ~60 dynamic lights,
     // and removing one on collect changes the scene light count, forcing every
     // lit shader in the scene to recompile (a multi-second freeze). The glowing
-    // ring + disc + spinning gun already read clearly without a real light.
+    // ring + disc + spinning gun + beam already read clearly without a real light.
 
     scene.add(this.root);
+    addOutline(this._gun, { width: 0.015 });   // outline the gun model only, not glow ring/disc
   }
 
   update(dt) {
@@ -614,8 +619,6 @@ export const RARITY_POOL = [
   { id: 'pistol',         weight: 25 },
   // Uncommon
   { id: 'smg',            weight: 18 },
-  { id: 'crossbow',       weight: 10 },
-  { id: 'silencedSMG',   weight:  8 },
   // Rare
   { id: 'ar',             weight: 12 },
   { id: 'heavyAR',        weight:  9 },
@@ -625,7 +628,6 @@ export const RARITY_POOL = [
   { id: 'dualPistols',    weight:  5 },
   { id: 'huntingRifle',   weight:  4 },
   { id: 'handCannon',     weight:  5 },
-  { id: 'flamethrower',   weight:  4 },
   // Legendary
   { id: 'sniper',          weight:  3 },
   { id: 'rocketLauncher',  weight:  2 },
@@ -646,7 +648,7 @@ export function randomWeaponDef(rng = Math.random) {
   let r = rng() * total;
   for (const entry of RARITY_POOL) {
     r -= entry.weight;
-    if (r <= 0) return WEAPON_DEFS[entry.id];
+    if (r <= 0) return WEAPON_DEFS[entry.id] ?? WEAPON_DEFS.pistol;
   }
   return WEAPON_DEFS.pistol;
 }
@@ -690,7 +692,7 @@ export function randomWeaponDefZoned(rng, x, z) {
   let r = rng() * total;
   for (const entry of adjusted) {
     r -= entry.w;
-    if (r <= 0) return WEAPON_DEFS[entry.id];
+    if (r <= 0) return WEAPON_DEFS[entry.id] ?? WEAPON_DEFS.pistol;
   }
   return WEAPON_DEFS.pistol;
 }

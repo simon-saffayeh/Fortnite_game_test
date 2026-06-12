@@ -154,7 +154,8 @@ class SupplyDrop {
     g.add(ring);
     this._markerRing = ring;
 
-    // Vertical light beam — visible at a distance, signals "stuff here".
+    // Vertical light beam — thin original style, visible at a distance
+    // for spotting incoming drops but not dominating the scene.
     const beam = new THREE.Mesh(
       new THREE.CylinderGeometry(0.25, 0.25, SPAWN_HEIGHT, 6, 1, true),
       new THREE.MeshBasicMaterial({
@@ -186,7 +187,7 @@ class SupplyDrop {
       if (this._currentY <= restY) {
         this._currentY = restY;
         this.state = LANDED;
-        // Once landed the beam is no longer useful — hide it.
+        // Hide beam once landed — drop is now visually on the ground.
         if (this._markerBeam) this._markerBeam.visible = false;
       }
     } else {
@@ -436,9 +437,15 @@ export class SupplyDropManager {
     // scatter places items around the crate at ~1.8 m so the player has to
     // walk around to gather everything rather than scooping a stacked pile.
     const baseAngle = drop.baseAngle ?? 0;
-    const weaponId  = drop.weaponId  ?? DROP_WEAPONS[0];
+    let   weaponId  = drop.weaponId  ?? DROP_WEAPONS[0];
     const healIds   = drop.healIds   ?? [DROP_HEALS[0], DROP_HEALS[1]];
 
+    // Guard against an unknown id (malformed/version-skewed broadcast) so the
+    // whole loot drop doesn't fail. Fall back to the default drop weapon.
+    if (!WEAPON_DEFS[weaponId]) {
+      console.warn(`[SupplyDrop] unknown weaponId "${weaponId}" — using ${DROP_WEAPONS[0]}`);
+      weaponId = DROP_WEAPONS[0];
+    }
     const wDef = WEAPON_DEFS[weaponId];
     const includeAmmo = !!(this.ammo && wDef.ammoType && wDef.ammoType !== 'special');
     const total = 1 + (includeAmmo ? 1 : 0) + 2;

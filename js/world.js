@@ -193,6 +193,7 @@ export class World {
     this._buildTerrain();
     this._buildWater();
     this._buildTrees();
+    this._buildFoliage();           // bushes / flowers / mushrooms — life on the ground
     this._buildStructures();
     this._buildProps();
     // Final pass: walk the scene graph and swap every plain Lambert material
@@ -232,7 +233,61 @@ export class World {
   _buildSky() {
     this._buildSkyGradient();
     this._buildSpriteSun();
+    this._buildDistantMountains();
     if (Graphics.cloudCount > 0) this._buildClouds();
+  }
+
+  // Distant mountain horizon: a cylinder ring at ~1400u radius with the top
+  // edge displaced by hash-based noise, painted with a fog-friendly dark
+  // slate so atmospheric perspective fades them naturally. Sits beyond the
+  // playable terrain (which extends ~400u). One draw call, ~200 tris, no
+  // animation cost.
+  _buildDistantMountains() {
+    const SEGMENTS = 128;
+    const RADIUS   = 1400;
+    const BASE_Y   = -10;        // sit slightly under water level
+    const TOP_Y    =  20;         // baseline ridge above the horizon
+
+    // Open-ended cylinder so we can see through the top + bottom.
+    const geo = new THREE.CylinderGeometry(RADIUS, RADIUS, TOP_Y - BASE_Y, SEGMENTS, 1, true);
+    geo.translate(0, (TOP_Y + BASE_Y) * 0.5, 0);
+
+    // Displace each top vertex upward by layered hash noise so the ridge
+    // looks like overlapping mountain peaks rather than a uniform wall.
+    const pos = geo.attributes.position;
+    const upperY = TOP_Y - 0.001;
+    const hash = (n) => {
+      const s = Math.sin(n) * 43758.5453123;
+      return s - Math.floor(s);
+    };
+    for (let i = 0; i < pos.count; i++) {
+      if (pos.getY(i) >= upperY - 0.01) {
+        const x = pos.getX(i), z = pos.getZ(i);
+        const ang = Math.atan2(z, x);
+        // 3 layers of noise at different frequencies → coarse peaks +
+        // finer ridges. Output range mapped to ~50-130 world units above the
+        // baseline so the ridge silhouette is varied but never towering.
+        const n1 = hash(ang * 6.0)  * 0.6;
+        const n2 = hash(ang * 17.0) * 0.3;
+        const n3 = hash(ang * 41.0) * 0.1;
+        const h  = (n1 + n2 + n3);
+        pos.setY(i, TOP_Y + 50 + h * 80);
+      }
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+
+    // Slate-blue mountain colour. fog: true so distance-fog blends them into
+    // the sky band naturally (atmospheric perspective).
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0x4d5b6b,
+      side: THREE.BackSide,
+      fog: true,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.renderOrder = -1;       // draw behind everything else
+    this.scene.add(mesh);
+    this._distantMountains = mesh;
   }
 
   // Vertex-coloured gradient sphere. Inside-out so we see the painted face.
@@ -310,57 +365,94 @@ export class World {
 
   _buildClouds() {
     const rng = this._rng;
-    const cloudGeo = new THREE.SphereGeometry(1, 7, 5);
-    // Clouds stay Lambert-cheap regardless of preset — PBR on clouds would
-    // pick up sun specular and look like wet glass at low altitude.
-    const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.88 });
+
+    // Procedural soft-cloud sprite. Multiple radial blobs composited onto a
+    // single canvas → fluffy silhouette, no hard edge anywhere. One texture
+    // shared by every cloud sprite in the scene; rotation + scale add visual
+    // variety per cloud.
+    const tex = this._cloudTex ?? (this._cloudTex = this._makeCloudTexture());
+    const cloudMat = new THREE.SpriteMaterial({
+      map: tex,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+      fog: true,
+    });
 
     const cloudCount = Graphics.cloudCount ?? 24;
     for (let i = 0; i < cloudCount; i++) {
-      const group = new THREE.Group();
-      const puffs = 3 + Math.floor(rng() * 4);
-      for (let p = 0; p < puffs; p++) {
-        const mesh = new THREE.Mesh(cloudGeo, cloudMat);
-        const sx = 30 + rng() * 50;
-        const sy = 14 + rng() * 20;
-        const sz = 20 + rng() * 30;
-        mesh.scale.set(sx, sy, sz);
-        mesh.position.set(
-          (rng() - 0.5) * sx * 2,
-          (rng() - 0.5) * sy * 0.5,
-          (rng() - 0.5) * sz
-        );
-        group.add(mesh);
-      }
-      group.position.set(
+      const sprite = new THREE.Sprite(cloudMat);
+      // Cloud size ~120-220 world units across — reads as a cloud at altitude.
+      const s = 120 + rng() * 100;
+      // Slight vertical squash so clouds aren't perfect circles.
+      sprite.scale.set(s, s * (0.45 + rng() * 0.15), 1);
+      sprite.position.set(
         (rng() - 0.5) * 1200,
-        250 + rng() * 150,
-        (rng() - 0.5) * 1200
+        260 + rng() * 140,
+        (rng() - 0.5) * 1200,
       );
-      this.scene.add(group);
-      group.userData.cloudSpeed = 0.5 + rng() * 1.5;
+      // Per-cloud horizontal drift speed (used in updateClouds).
+      sprite.userData.cloudSpeed = 0.5 + rng() * 1.5;
+      this.scene.add(sprite);
       this._clouds = this._clouds || [];
-      this._clouds.push(group);
+      this._clouds.push(sprite);
     }
+  }
+
+  // Soft cloud texture: stacked radial gradients with random offsets give a
+  // billowy silhouette. Single 256² CanvasTexture, generated once and shared.
+  _makeCloudTexture() {
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    // Transparent canvas; we additively paint white blobs onto it.
+    ctx.clearRect(0, 0, size, size);
+    // 6-8 blobs with random offsets within a center bias keeps the silhouette
+    // round-ish but lumpy. Each blob is its own soft radial gradient → no
+    // hard edges, no banding.
+    const blobs = 7;
+    for (let i = 0; i < blobs; i++) {
+      const a   = (i / blobs) * Math.PI * 2 + Math.random() * 0.4;
+      const r   = (0.10 + Math.random() * 0.30) * size;
+      const cx  = size / 2 + Math.cos(a) * r * 0.6;
+      const cy  = size / 2 + Math.sin(a) * r * 0.45;
+      const rad = (0.18 + Math.random() * 0.18) * size;
+      const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, rad);
+      grad.addColorStop(0.00, 'rgba(255,255,255,0.85)');
+      grad.addColorStop(0.55, 'rgba(255,255,255,0.35)');
+      grad.addColorStop(1.00, 'rgba(255,255,255,0.00)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
   }
 
   // ── Lights ──────────────────────────────────────────────────────────
   _buildLights() {
-    // Original pre-IBL balance, applied uniformly. The sky no longer feeds
-    // any energy into the scene (no PMREM bake) so we don't need the IBL
-    // compensation factors. These values were tuned and looked correct
-    // before we started the graphics overhaul.
-    const hemiInt   = 1.00;
-    const ambInt    = 0.60;
-    const sunInt    = 2.60;
+    // Fortnite-leaning balance:
+    //   - Slightly brighter hemi for a soft sky/ground bounce that lifts
+    //     shadows without washing out the toon bands.
+    //   - More ambient so dark sides of objects read as "in shadow" rather
+    //     than "black."
+    //   - Sun pulled a little warmer and slightly toned down (since the
+    //     toon ramp's lit band is already at max). Net: warm key + cool
+    //     fill, characteristic Fortnite look.
+    const hemiInt   = 1.15;
+    const ambInt    = 0.75;
+    const sunInt    = 2.35;
 
-    const hemi = new THREE.HemisphereLight(0x9ed7ff, 0x6a9968, hemiInt);
+    const hemi = new THREE.HemisphereLight(0xb8e0ff, 0x7aa074, hemiInt);
     this.scene.add(hemi);
 
-    const ambient = new THREE.AmbientLight(0xbcd6ee, ambInt);
+    const ambient = new THREE.AmbientLight(0xc8d8ee, ambInt);
     this.scene.add(ambient);
 
-    const sun = new THREE.DirectionalLight(0xfff1c8, sunInt);
+    const sun = new THREE.DirectionalLight(0xffe09a, sunInt);
     sun.position.set(200, 400, -300);
     sun.castShadow = Graphics.shadowsEnabled;
     const smap = Graphics.shadowMapSize ?? 1024;
@@ -622,7 +714,16 @@ export class World {
   _buildWater() {
     const S = this.size;
     this._waterUniforms = { time: { value: 0 } };
+    if (Graphics.stylizedWater) {
+      return this._buildStylizedWater();
+    }
 
+    // Enhanced water (realistic path):
+    // - Same animated wave heights as before (3 layered sines).
+    // - Analytical normal derived from the wave gradient — no normal map needed.
+    // - Sun-direction Blinn-Phong specular for the glittery shimmer.
+    // - Schlick fresnel for sky-tinted reflection at glancing angles.
+    // - Original deep/shallow/foam color logic preserved as the diffuse base.
     const mat = new THREE.ShaderMaterial({
       uniforms: this._waterUniforms,
       transparent: true,
@@ -631,29 +732,141 @@ export class World {
         uniform float time;
         varying vec2 vUv;
         varying float vWave;
+        varying vec3 vWorldPos;
+        // Same wave function as the fragment uses, just in 1 place.
+        float waveAt(vec2 p, float t) {
+          return sin(p.x * 0.07 + t * 1.1) * 0.28
+               + sin(p.y * 0.11 + t * 0.85) * 0.22
+               + sin((p.x + p.y) * 0.05 + t * 1.4) * 0.16;
+        }
         void main() {
           vUv = uv;
           vec3 p = position;
-          float w = sin(p.x * 0.07 + time * 1.1) * 0.28
-                  + sin(p.z * 0.11 + time * 0.85) * 0.22
-                  + sin((p.x + p.z) * 0.05 + time * 1.4) * 0.16;
+          float w = waveAt(p.xz, time);
           p.y += w;
           vWave = w;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+          vec4 wp = modelMatrix * vec4(p, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
         }
       `,
       fragmentShader: `
         uniform float time;
         varying vec2 vUv;
         varying float vWave;
+        varying vec3 vWorldPos;
+
         void main() {
+          // --- Diffuse base (unchanged) ---
           float ripple = sin(vUv.x * 38.0 + time * 1.8) * sin(vUv.y * 38.0 + time * 1.4) * 0.5 + 0.5;
           vec3 deep    = vec3(0.01, 0.22, 0.38);
           vec3 shallow = vec3(0.08, 0.48, 0.68);
           vec3 foam    = vec3(0.60, 0.85, 0.96);
           vec3 color   = mix(deep, shallow, ripple * 0.55 + 0.28);
           color = mix(color, foam, smoothstep(0.22, 0.44, vWave + 0.3) * 0.55);
-          gl_FragColor = vec4(color, 0.82);
+
+          // --- Analytical wave normal ---
+          // Partial derivatives of the wave height function at this world XZ.
+          float x = vWorldPos.x;
+          float z = vWorldPos.z;
+          float dWdx = cos(x * 0.07 + time * 1.1) * 0.28 * 0.07
+                     + cos((x + z) * 0.05 + time * 1.4) * 0.16 * 0.05;
+          float dWdz = cos(z * 0.11 + time * 0.85) * 0.22 * 0.11
+                     + cos((x + z) * 0.05 + time * 1.4) * 0.16 * 0.05;
+          vec3 n = normalize(vec3(-dWdx, 1.0, -dWdz));
+
+          // --- View + sun directions ---
+          vec3 viewDir = normalize(cameraPosition - vWorldPos);
+          vec3 sunDir  = normalize(vec3(200.0, 400.0, -300.0));
+
+          // --- Sun specular (Blinn-Phong half-vector) ---
+          vec3 H = normalize(viewDir + sunDir);
+          float spec = pow(max(dot(n, H), 0.0), 64.0);
+          vec3 sunCol = vec3(1.00, 0.92, 0.78);   // warm sun tint
+          color += sunCol * spec * 0.85;
+
+          // --- Fresnel: sky-tinted reflection at glancing angles ---
+          float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 5.0);
+          vec3 skyTint = vec3(0.55, 0.75, 0.95);  // matches gradient sky mid colour
+          color = mix(color, skyTint, fres * 0.45);
+
+          gl_FragColor = vec4(color, 0.85);
+        }
+      `,
+    });
+
+    const geo = new THREE.PlaneGeometry(S * 3, S * 3, 48, 48);
+    geo.rotateX(-Math.PI / 2);
+    const water = new THREE.Mesh(geo, mat);
+    water.position.y = this.waterLevel;
+    this.scene.add(water);
+    this._waterMat = mat;
+  }
+
+  // Stylized cartoon water — smooth painted look. Smooth depth-based colour
+  // gradient + sine-driven highlight stripes + wave-crest foam. No grid
+  // quantization (the prior version's `floor(uv * 8)` hash foam read as
+  // hard pixel-art blocks at any visible distance). No fresnel, no specular.
+  _buildStylizedWater() {
+    const S = this.size;
+    const mat = new THREE.ShaderMaterial({
+      uniforms: this._waterUniforms,
+      transparent: true,
+      depthWrite: false,
+      vertexShader: /* glsl */ `
+        uniform float time;
+        varying float vWave;
+        varying vec3 vWorldPos;
+        void main() {
+          vec3 p = position;
+          float w = sin(p.x * 0.07 + time * 1.0) * 0.20
+                  + sin(p.z * 0.11 + time * 0.7) * 0.14
+                  + sin((p.x - p.z) * 0.05 + time * 1.3) * 0.10;
+          p.y += w;
+          vWave = w;
+          vec4 wp = modelMatrix * vec4(p, 1.0);
+          vWorldPos = wp.xyz;
+          gl_Position = projectionMatrix * viewMatrix * wp;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform float time;
+        varying float vWave;
+        varying vec3 vWorldPos;
+
+        void main() {
+          // ── Base palette — smooth gradient across three water tones ──
+          // Wave height modulates the blend so peaks read brighter and
+          // troughs deeper. No fixed-frequency sine patterns anywhere —
+          // every visible term derives from the per-vertex wave height,
+          // which is interpolated smoothly across the surface.
+          vec3 deep    = vec3(0.04, 0.22, 0.48);
+          vec3 mid     = vec3(0.10, 0.40, 0.68);
+          vec3 shallow = vec3(0.24, 0.62, 0.84);
+          float t = clamp(vWave * 1.8 + 0.5, 0.0, 1.0);
+          vec3 color = (t < 0.5)
+            ? mix(deep, mid, t * 2.0)
+            : mix(mid, shallow, (t - 0.5) * 2.0);
+
+          float dist = length(cameraPosition - vWorldPos);
+
+          // ── Wave-crest foam ──
+          // Soft white wash on the top ~15 % of each wave. Driven purely by
+          // vWave (interpolated per-vertex), so it reads as breaking-wave
+          // outlines rather than a regular grid.
+          float crest = smoothstep(0.18, 0.32, vWave);
+          // Distance fade so foam doesn't read as speckles at the horizon.
+          crest *= 1.0 - smoothstep(80.0, 280.0, dist);
+          color = mix(color, vec3(0.94, 0.98, 1.00), crest * 0.45);
+
+          // ── Horizon haze tint ──
+          // Far water blends toward the sky horizon band so the plane edge
+          // fades into atmosphere instead of terminating in flat blue.
+          vec3 horizonTint = vec3(0.45, 0.62, 0.78);
+          float hazeT = smoothstep(180.0, 420.0, dist);
+          color = mix(color, horizonTint, hazeT * 0.55);
+
+          gl_FragColor = vec4(color, 0.92);
         }
       `,
     });
@@ -672,6 +885,18 @@ export class World {
     const leaf1Mat = new THREE.MeshLambertMaterial({ color: 0x2d7a2d });
     const leaf2Mat = new THREE.MeshLambertMaterial({ color: 0x1a5c1a });
     const palmMat  = new THREE.MeshLambertMaterial({ color: 0x8bc34a });
+
+    // Wind sway — patch Lambert's vertex shader so leaf/palm vertices drift
+    // horizontally based on time + position. Trunk stays static (lowest in
+    // the merged geometry; height-weighted with smoothstep). Materials carry
+    // their compiled `shader` ref on userData so updateWind() can poke the
+    // time uniform each frame.
+    const _windMats = [];
+    this._addWindToMaterial(leaf1Mat, 1.0);
+    this._addWindToMaterial(leaf2Mat, 1.0);
+    this._addWindToMaterial(palmMat,  1.3);   // palm fronds sway more
+    _windMats.push(leaf1Mat, leaf2Mat, palmMat);
+    this._windMaterials = _windMats;
 
     const S = this.size;
     const rng = this._rng;
@@ -719,6 +944,135 @@ export class World {
     addMerged(buckets.leaf1, leaf1Mat, true);   // pine cones (cast)
     addMerged(buckets.leaf2, leaf2Mat, true);   // pine cones (cast)
     addMerged(buckets.palm,  palmMat,  false);  // palm fronds (no shadow, as before)
+  }
+
+  // ── Foliage variety: bushes, flowers, mushrooms ─────────────────────
+  // Three InstancedMeshes (one per type) populated with deterministic random
+  // placements across the grass-zone terrain. Single draw call each → cheap
+  // even at hundreds of instances.
+  _buildFoliage() {
+    const rng = this._rng;
+    const S = this.size;
+    const dummy = new THREE.Object3D();
+
+    // ── Bushes — chunky low-poly sphere clusters ──────────────────────
+    const bushGeo = new THREE.IcosahedronGeometry(1, 0);
+    const bushMat = new THREE.MeshLambertMaterial({ color: 0x3a7c30 });
+    const BUSH_COUNT = 480;
+    const bushes = new THREE.InstancedMesh(bushGeo, bushMat, BUSH_COUNT);
+    bushes.castShadow = true;
+    bushes.receiveShadow = true;
+    let bIdx = 0;
+    for (let attempt = 0; attempt < BUSH_COUNT * 3 && bIdx < BUSH_COUNT; attempt++) {
+      const x = (rng() - 0.5) * S * 0.78;
+      const z = (rng() - 0.5) * S * 0.78;
+      const h = this._getHeight(x, z);
+      if (h < 0.8 || h > 20) continue;        // grass zone only
+      const s = 0.55 + rng() * 0.45;
+      dummy.position.set(x, h + s * 0.4, z);
+      dummy.scale.set(s, s * 0.78, s);
+      dummy.rotation.y = rng() * Math.PI * 2;
+      dummy.updateMatrix();
+      bushes.setMatrixAt(bIdx++, dummy.matrix);
+    }
+    bushes.count = bIdx;                       // shrink if some attempts failed
+    bushes.instanceMatrix.needsUpdate = true;
+    this.scene.add(bushes);
+
+    // ── Flowers — bright sprite-like quads, 4 colours interleaved ──────
+    // Tiny crossed quads (two perpendicular planes) so they read from any
+    // angle without needing to face the camera.
+    const flowerColors = [0xffcc22, 0xff5577, 0xff8833, 0xffffff];
+    const FLOWERS_PER_COLOR = 90;
+    for (const col of flowerColors) {
+      const fGeo = this._makeCrossedQuadGeometry(0.18, 0.32);
+      const fMat = new THREE.MeshBasicMaterial({
+        color: col, side: THREE.DoubleSide,
+        transparent: true, alphaTest: 0.5, fog: true,
+      });
+      const flowers = new THREE.InstancedMesh(fGeo, fMat, FLOWERS_PER_COLOR);
+      flowers.castShadow = false;
+      flowers.receiveShadow = false;
+      let fIdx = 0;
+      for (let attempt = 0; attempt < FLOWERS_PER_COLOR * 4 && fIdx < FLOWERS_PER_COLOR; attempt++) {
+        const x = (rng() - 0.5) * S * 0.78;
+        const z = (rng() - 0.5) * S * 0.78;
+        const h = this._getHeight(x, z);
+        if (h < 1.0 || h > 18) continue;
+        const s = 0.7 + rng() * 0.5;
+        dummy.position.set(x, h + 0.15 * s, z);
+        dummy.scale.setScalar(s);
+        dummy.rotation.y = rng() * Math.PI * 2;
+        dummy.updateMatrix();
+        flowers.setMatrixAt(fIdx++, dummy.matrix);
+      }
+      flowers.count = fIdx;
+      flowers.instanceMatrix.needsUpdate = true;
+      this.scene.add(flowers);
+    }
+
+    // ── Mushrooms — stalk + cap, near rocky/wet zones ─────────────────
+    // Cap is a half-sphere, stalk is a thin cylinder; we merge them into
+    // one geometry per mushroom shape and instance it.
+    const mushGeo = this._makeMushroomGeometry();
+    const mushMat = new THREE.MeshLambertMaterial({ color: 0xc54545 });
+    const MUSH_COUNT = 240;
+    const mushrooms = new THREE.InstancedMesh(mushGeo, mushMat, MUSH_COUNT);
+    mushrooms.castShadow = true;
+    let mIdx = 0;
+    for (let attempt = 0; attempt < MUSH_COUNT * 4 && mIdx < MUSH_COUNT; attempt++) {
+      const x = (rng() - 0.5) * S * 0.78;
+      const z = (rng() - 0.5) * S * 0.78;
+      const h = this._getHeight(x, z);
+      // Bias toward darker/wetter places — low-mid grass zones.
+      if (h < 1.5 || h > 12) continue;
+      const s = 0.55 + rng() * 0.55;
+      dummy.position.set(x, h, z);
+      dummy.scale.setScalar(s);
+      dummy.rotation.y = rng() * Math.PI * 2;
+      dummy.updateMatrix();
+      mushrooms.setMatrixAt(mIdx++, dummy.matrix);
+    }
+    mushrooms.count = mIdx;
+    mushrooms.instanceMatrix.needsUpdate = true;
+    this.scene.add(mushrooms);
+  }
+
+  // Two perpendicular quads (cross-billboard) for flowers. Reads as a
+  // flower from any angle without sprite-billboard cost.
+  _makeCrossedQuadGeometry(w, h) {
+    const g = new THREE.BufferGeometry();
+    const hw = w * 0.5;
+    const verts = new Float32Array([
+      // Quad A (xz oriented to face +z)
+      -hw, 0, 0,   hw, 0, 0,   hw, h, 0,
+      -hw, 0, 0,   hw, h, 0,  -hw, h, 0,
+      // Quad B (rotated 90° around y)
+       0, 0, -hw,  0, 0, hw,  0, h, hw,
+       0, 0, -hw,  0, h, hw,  0, h, -hw,
+    ]);
+    const uvs = new Float32Array([
+      0, 0,  1, 0,  1, 1,
+      0, 0,  1, 1,  0, 1,
+      0, 0,  1, 0,  1, 1,
+      0, 0,  1, 1,  0, 1,
+    ]);
+    g.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+    g.setAttribute('uv',       new THREE.BufferAttribute(uvs, 2));
+    g.computeVertexNormals();
+    return g;
+  }
+
+  // Mushroom: tiny cylinder stalk (white) + half-sphere cap (red). Merged
+  // into one geometry so we can instance it in a single draw call. The
+  // material is a single color (red); we accept the stalk being red too
+  // since at scale it reads as a mushroom silhouette either way.
+  _makeMushroomGeometry() {
+    const stalk = new THREE.CylinderGeometry(0.06, 0.08, 0.22, 8);
+    stalk.translate(0, 0.11, 0);
+    const cap   = new THREE.SphereGeometry(0.16, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    cap.translate(0, 0.22, 0);
+    return mergeGeometries([stalk, cap]);
   }
 
   // Returns [{ geo, bucket }] — each geometry has its part-local transform
@@ -2755,6 +3109,44 @@ export class World {
       });
     }
     if (this._waterMat) this._waterMat.uniforms.time.value += dt;
+    // Tree wind — onBeforeCompile attaches `userData.shader` on first render.
+    // Until then the field is unset, so we just skip without churning.
+    if (this._windMaterials) {
+      for (const m of this._windMaterials) {
+        const s = m.userData?.shader;
+        if (s) s.uniforms.uWindTime.value += dt;
+      }
+    }
+  }
+
+  // Inject a height-weighted horizontal sway into the Lambert vertex shader
+  // so leaves drift in the wind while trunks stay still. Strength is a
+  // per-material multiplier (palms get a higher one).
+  _addWindToMaterial(mat, strength = 1.0) {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uWindTime     = { value: 0 };
+      shader.uniforms.uWindStrength = { value: strength };
+      shader.vertexShader = 'uniform float uWindTime;\nuniform float uWindStrength;\n' +
+        shader.vertexShader.replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+            // World Y after the per-tree transform was baked, so this is
+            // already a global height. smoothstep keeps trunk base at 0
+            // sway and lets the canopy at y>3 sway with full strength.
+            float _wY = transformed.y;
+            float _phase = transformed.x * 0.10 + transformed.z * 0.07;
+            float _w = sin(uWindTime * 1.4 + _phase) * 0.22
+                     + sin(uWindTime * 2.3 + transformed.z * 0.13) * 0.10;
+            float _weight = smoothstep(0.5, 4.0, _wY) * uWindStrength;
+            transformed.x += _w * _weight;
+            transformed.z += _w * _weight * 0.55;
+          `,
+        );
+      mat.userData.shader = shader;
+    };
+    // Customize the program cache key per strength so two materials with
+    // different strengths don't share one shader.
+    mat.customProgramCacheKey = () => `wind_${strength}`;
   }
 
   /**

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { paintedPBR, boxGeo, fabricPBR, skinPBR } from './materials.js';
+import { addOutline } from './outline.js';
 
 const FOOT_OFFSET    = 0.42;
 const DETECT_RANGE   = 65;
@@ -52,6 +53,7 @@ export class Enemy {
 
     this._buildModel(position);
     this._buildHealthBar();
+    addOutline(this.root, { width: 0.025 });
   }
 
   // ── Model ────────────────────────────────────────────────────────────────

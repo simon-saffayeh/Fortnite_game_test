@@ -46,10 +46,16 @@
         <input type="checkbox" id="build-toggle" />
         <span class="build-option-label">Enable Building</span>
       </label>
+      <!-- Testing Mode toggle — hidden for production. Uncomment to re-enable
+           the dev loadout (full weapon set + ammo, 2× sprint). When absent,
+           main.js `_testingEnabled()` defaults to false, so the game runs in
+           normal production mode. -->
+      <!--
       <label class="build-option testing-option">
         <input type="checkbox" id="testing-toggle" />
         <span class="build-option-label testing-label">Testing Mode</span>
       </label>
+      -->
       <div class="options-panel">
         <div class="options-row">
           <label class="options-label" for="sens-slider">SENSITIVITY</label>

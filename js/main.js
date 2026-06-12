@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }     from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass }from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass }     from 'three/addons/postprocessing/ShaderPass.js';
+import { SMAAPass }       from 'three/addons/postprocessing/SMAAPass.js';
 import { World }             from './world.js';
 import { Player }            from './player.js';
 import { ThirdPersonCamera } from './camera.js';
@@ -25,6 +26,8 @@ import { SpectatorController, PHASE_SPECTATING } from './spectator.js';
 import { SupplyDropManager } from './supplyDrops.js';
 import { AmmoSystem, AMMO_VISUAL } from './ammo.js';
 import { Graphics, PRESETS } from './graphics.js';
+import { DecalSystem } from './decals.js';
+import { GrassSystem } from './grass.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -544,6 +547,15 @@ class Game {
 
     this.composer.addPass(new RenderPass(this.scene, this.camera));
 
+    // SMAA — Subpixel Morphological Anti-Aliasing. Cheaper than MSAA at the
+    // composer level and catches the jaggies that bloom + outline tend to
+    // amplify. Runs at composer resolution so it scales naturally with the
+    // pixel-ratio cap. ~0.5 ms on mid-tier GPUs.
+    if (Graphics.smaaEnabled) {
+      const pr = Math.min(window.devicePixelRatio, Graphics.pixelRatioCap);
+      this.composer.addPass(new SMAAPass(w * pr, h * pr));
+    }
+
     // Bloom — strength 0.55 is moderate (not blown-out), radius 0.4 spreads
     // it naturally, threshold 0.85 ignores normal-lit surfaces and only
     // catches emissives (storm, sun, muzzle flashes, fire pits, supply-drop lids).
@@ -617,10 +629,17 @@ class Game {
     // uniform is bumped each frame in the loop.
     this._grainPass = new ShaderPass({
       uniforms: {
-        tDiffuse: { value: null },
-        uTime:    { value: 0 },
-        uVignette:{ value: 0.45 },
-        uGrain:   { value: 0.0 },
+        tDiffuse:    { value: null },
+        uTime:       { value: 0 },
+        uVignette:   { value: 0.45 },
+        uGrain:      { value: 0.0 },
+        // 0 = no chromatic aberration, ~0.004 = subtle scope-lens shimmer.
+        // Set per-frame from main loop based on player.adsActive.
+        uChromatic:  { value: 0.0 },
+        // Cartoon colour grade strength — 0 disables, ~0.5 is a strong
+        // Fortnite-like saturated palette shift. Set once at boot based on
+        // preset.
+        uGradeStr:   { value: Graphics.cartoonGrade ? 0.45 : 0.0 },
       },
       vertexShader: /*glsl*/ `
         varying vec2 vUv;
@@ -634,6 +653,8 @@ class Game {
         uniform float uTime;
         uniform float uVignette;
         uniform float uGrain;
+        uniform float uChromatic;
+        uniform float uGradeStr;
         varying vec2 vUv;
         // Hash-based pseudo-random noise — cheap, no texture sample.
         float hash(vec2 p) {
@@ -641,10 +662,46 @@ class Game {
           p += dot(p, p + 45.32);
           return fract(p.x * p.y);
         }
+        // Cheap saturation boost via channel push relative to grayscale.
+        vec3 boostSat(vec3 c, float amount) {
+          float g = dot(c, vec3(0.299, 0.587, 0.114));
+          return mix(vec3(g), c, 1.0 + amount);
+        }
         void main() {
-          vec4 col = texture2D(tDiffuse, vUv);
-          // Vignette: subtle darkening toward the corners.
           vec2 q = vUv - 0.5;
+          vec4 col;
+          if (uChromatic > 0.0001) {
+            // Radial chromatic aberration — channels offset along the
+            // direction-to-centre vector, scaled by distance² so the centre
+            // stays clean and the screen edges shimmer (lens-edge feel).
+            float r2 = dot(q, q);
+            vec2 dir = q * r2;
+            col.r = texture2D(tDiffuse, vUv - dir * uChromatic).r;
+            col.g = texture2D(tDiffuse, vUv).g;
+            col.b = texture2D(tDiffuse, vUv + dir * uChromatic).b;
+            col.a = 1.0;
+          } else {
+            col = texture2D(tDiffuse, vUv);
+          }
+
+          // Cartoon grade — lift shadows toward teal, warm midtones toward
+          // gold, boost saturation. Cheap (3 mixes + 1 dot) and entirely
+          // gated by uGradeStr so it's a no-op below MEDIUM preset.
+          if (uGradeStr > 0.001) {
+            float l = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+            // Shadow lift — pull dark pixels toward cool teal.
+            vec3 shadowTint = vec3(0.18, 0.32, 0.40);
+            float shadowMask = 1.0 - smoothstep(0.0, 0.35, l);
+            col.rgb = mix(col.rgb, mix(col.rgb, shadowTint, 0.35), shadowMask * uGradeStr);
+            // Midtone warmth — push warm-channel-heavy pixels toward gold.
+            vec3 warmTint = vec3(1.10, 1.03, 0.88);
+            float midMask = smoothstep(0.20, 0.55, l) * (1.0 - smoothstep(0.65, 0.95, l));
+            col.rgb = mix(col.rgb, col.rgb * warmTint, midMask * uGradeStr * 0.5);
+            // Global saturation boost — Fortnite palette is highly saturated.
+            col.rgb = boostSat(col.rgb, uGradeStr * 0.35);
+          }
+
+          // Vignette: subtle darkening toward the corners.
           float vig = smoothstep(0.95, 0.45, length(q));
           col.rgb *= mix(1.0, vig, uVignette * 0.35);
           // Grain: time-animated noise, additive in luminance.
@@ -704,6 +761,18 @@ class Game {
     this.camera3P  = new ThirdPersonCamera(this.camera, this.player);
     this.particles = new ParticleSystem(this.scene);
     this.projectiles = new ProjectileSystem(this.scene, this.world);
+    // Decal pool — bullet impacts paint a fading scorch on terrain + walls.
+    // Gated by Graphics.decalsEnabled (HIGH/ULTRA only by default).
+    if (Graphics.decalsEnabled) {
+      this.decals = new DecalSystem(this.scene);
+      this.projectiles.onImpactDecal = (pos, normal) => {
+        this.decals.spawn(pos, normal, 0.5);
+      };
+    }
+    // Instanced grass disc around the player. MEDIUM+ presets.
+    if (Graphics.grassEnabled) {
+      this.grass = new GrassSystem(this.scene, this.world);
+    }
     // Ammo system must exist before WeaponSystem so weapons can spawn
     // matching ammo piles next to themselves at world setup.
     this.ammo      = new AmmoSystem(this.scene, this.world);
@@ -832,7 +901,23 @@ class Game {
     this.hud.setPickupManager(this.pickups);
     if (this.supplyDrops) this.hud.setSupplyDrops(this.supplyDrops);
     this.hud.setCamera(this.camera, this.canvas);
-    this.inventory.onHealProgress = (progress, label) => this.hud.setHealProgress(progress, label);
+    this.inventory.onHealProgress = (progress, label) => {
+      this.hud.setHealProgress(progress, label);
+      // Heal vignette — green for HP heals, blue for shield. label is the
+      // consumable's user-facing name like "Med Kit" / "Shield Sip".
+      if (!this._healVignette) {
+        this._healVignette = document.createElement('div');
+        this._healVignette.id = 'heal-vignette';
+        document.body.appendChild(this._healVignette);
+      }
+      if (progress > 0 && progress < 1) {
+        const isShield = /shield/i.test(label ?? '');
+        this._healVignette.classList.toggle('shield', isShield);
+        this._healVignette.classList.add('active');
+      } else {
+        this._healVignette.classList.remove('active', 'shield');
+      }
+    };
 
     // Drop a slot → spawn a world pickup at the player's feet (forward
     // offset so it doesn't clip the body). For weapons we preserve the
@@ -911,6 +996,20 @@ class Game {
       this.hud.flashDamage();
       this.shake.shake(0.22);
       if (sourcePos) this.dirDmg.show(this.player.getPosition(), this.player.getYaw(), sourcePos);
+      // Red edge vignette flash — Fortnite-style. Pulse on every hit.
+      if (!this._dmgVignette) {
+        this._dmgVignette = document.createElement('div');
+        this._dmgVignette.id = 'damage-vignette';
+        document.body.appendChild(this._dmgVignette);
+      }
+      this._dmgVignette.classList.remove('hit');
+      // Force reflow so the class toggle re-triggers the fast-in transition.
+      void this._dmgVignette.offsetWidth;
+      this._dmgVignette.classList.add('hit');
+      clearTimeout(this._dmgVignetteTimer);
+      this._dmgVignetteTimer = setTimeout(() => {
+        this._dmgVignette?.classList.remove('hit');
+      }, 90);
     };
     this.player.onDeath = (killerLabel) => {
       // Gather inventory contents → spawn world pickups around the body
@@ -1321,44 +1420,9 @@ class Game {
     }
   }
 
-  // ── Storm phase announcements ─────────────────────────────────────────────
-  _checkStormAnnouncement() {
-    if (!this.storm || !this.hud) return;
-    const info  = this.storm.getInfo();
-    const key   = `${info.phase}_${info.state}`;
-    const prev  = this._stormPrevKey;
-    this._stormPrevKey = key;
-    if (!prev || key === prev) return;   // first call or no change
-
-    // Storm colors by phase (1-indexed)
-    const phaseColors = ['', '#4477ff', '#9933ff', '#ff22bb', '#ff3300'];
-    const color = phaseColors[Math.min(info.phase, phaseColors.length - 1)];
-
-    if (info.state === 'pending') return;
-
-    if (prev.endsWith('_pending') && info.state === 'waiting') {
-      // Bus just landed everyone — first safe period begins
-      this.hud.showStormAnnouncement(
-        'STORM INCOMING',
-        `Zone 1 closes in ${Math.ceil(info.timeLeft)}s`,
-        '#4477ff',
-      );
-    } else if (info.state === 'shrinking') {
-      this.hud.showStormAnnouncement(
-        `ZONE ${info.phase} CLOSING`,
-        'Move to the safe zone!',
-        color,
-      );
-    } else if (info.state === 'waiting' && info.phase > 1) {
-      this.hud.showStormAnnouncement(
-        `ZONE ${info.phase}`,
-        `Next close in ${Math.ceil(info.timeLeft)}s`,
-        color,
-      );
-    } else if (info.state === 'done') {
-      this.hud.showStormAnnouncement('FINAL ZONE', 'The circle will not shrink further', '#ff3300');
-    }
-  }
+  // Storm phase announcements removed at user request. Storm state still
+  // shows in the HUD strip; we just don't pop a big banner per transition.
+  _checkStormAnnouncement() {}
 
   // ── ADS ───────────────────────────────────────────────────────────────────
   _updateADS() {
@@ -2047,7 +2111,16 @@ class Game {
     // spike, back up when they recover. No-op when dynamicResolution=false.
     Graphics.tickAdaptiveResolution(dt, this.composer, this.renderer);
     if (this.composer) {
-      if (this._grainPass) this._grainPass.uniforms.uTime.value += 0.016;
+      if (this._grainPass) {
+        this._grainPass.uniforms.uTime.value += 0.016;
+        // Smooth chromatic-aberration ramp during ADS — lens-edge shimmer
+        // strengthens as the scope zoom takes hold and snaps off when
+        // released. Stays near zero outside of ADS so the rest of the time
+        // the pass is effectively a single texture sample.
+        const u = this._grainPass.uniforms.uChromatic;
+        const target = this.player?.adsActive ? 0.004 : 0.0;
+        u.value += (target - u.value) * Math.min(1, dt * 8);
+      }
       this.composer.render();
     } else {
       this.renderer.render(this.scene, this.camera);
@@ -2174,6 +2247,8 @@ class Game {
       tickProtractorLasers(dt);
       this.shake.update(dt);
       this.muzzle.update(dt);
+      this.decals?.update(dt);
+      this.grass?.update(dt, this.player.getPosition());
       this.dirDmg.update(dt);
       this.hitMark.update(dt);
       this.hud.update(dt);

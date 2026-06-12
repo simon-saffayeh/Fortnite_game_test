@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildGunModel } from './weapons.js';
 import { paintedPBR, boxGeo, fabricPBR, skinPBR, metalPBR } from './materials.js';
+import { addOutline } from './outline.js';
 
 const MOVE_SPEED   = 8;
 const SPRINT_SPEED = 16;
@@ -173,6 +174,8 @@ export class Player {
     this.rightForearm.add(this.gunAttachPoint);
 
     this.root.traverse(o => { if (o.isMesh) o.receiveShadow = true; });
+    // Vertex-shell outline around the body so the silhouette pops.
+    addOutline(this.body, { width: 0.025 });
 
     this._animParts = {
       leftArm:  this.leftArmGroup,
@@ -192,6 +195,9 @@ export class Player {
     }
     if (!def) return;
     const model = buildGunModel(def, 0.58);
+    // Thinner outline for the held gun model — full character width looks
+    // too thick on such small parts.
+    addOutline(model, { width: 0.012 });
     this.gunAttachPoint.add(model);
   }
 

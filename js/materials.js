@@ -17,9 +17,36 @@ import { getDetailMaps } from './textures.js';
 
 const _cachePBR     = new Map();
 const _cacheLambert = new Map();
+const _cacheToon    = new Map();
 // Geometry cache: keyed by dimensions + segments + radius so a player's
 // 25-mesh body reuses the same RoundedBoxGeometry instances across instances.
 const _cacheGeo     = new Map();
+
+// Shared 5-pixel toon gradient texture: hard-banded ramp from dark to light.
+// NearestFilter forces no interpolation between bands so we get the classic
+// "3-tone Fortnite shading" rather than a smooth gradient.
+let _toonGradient = null;
+function _getToonGradient() {
+  if (_toonGradient) return _toonGradient;
+  // Fortnite-leaning ramp: lifted shadow band so the dark areas don't crush
+  // to near-black, brighter midtone, hard-cut lit band. Shadows still
+  // visibly distinct, but everything reads cheerful and vivid like
+  // Fortnite's "always sunny" lighting.
+  const data = new Uint8Array([
+    110, 110, 110, 255,  // shadow — lifted from 77 so darks read warm/grey, not black
+    110, 110, 110, 255,
+    195, 195, 195, 255,  // mid — pushed up from 166 for brighter midtones
+    255, 255, 255, 255,  // lit
+    255, 255, 255, 255,
+  ]);
+  const tex = new THREE.DataTexture(data, 5, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
+  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  _toonGradient = tex;
+  return tex;
+}
 
 /** Stable cache key from the option bag. */
 function _key(color, rough, metal, emissive, emissiveIntensity, transparent, opacity, side, detail, normalScale, envMapIntensity) {
@@ -52,6 +79,53 @@ export function paintedPBR(color, opts = {}) {
   const normalScale       = opts.normalScale       ?? 0.6;
 
   const key = _key(color, rough, metal, emissive, emissiveIntensity, transparent, opacity, side, detail, normalScale, opts.envMapIntensity);
+
+  // Toon shading override: when the preset is on AND the caller isn't asking
+  // for genuine metalness (>0.4), route to a MeshToonMaterial with a banded
+  // gradient. Metallic surfaces (gun barrels) still get PBR so their specular
+  // reads correctly — Fortnite does the same. Emissive is preserved.
+  if (Graphics.toonShading && metal < 0.4 && !opts._noToon) {
+    let mat = _cacheToon.get(key);
+    if (!mat) {
+      mat = new THREE.MeshToonMaterial({
+        color,
+        gradientMap: _getToonGradient(),
+        emissive,
+        emissiveIntensity,
+        transparent,
+        opacity,
+        side,
+      });
+      // Inject rim lighting — boosts the silhouette edge so characters
+      // pop against the world. Cheap (a dot + pow + add at the end).
+      mat.onBeforeCompile = (shader) => {
+        // Stronger, warmer rim — Fortnite characters have a clearly visible
+        // edge glow against the world. Slight warm tint reads as "sun rim"
+        // catching the silhouette rather than a cold ambient kick.
+        shader.uniforms.uRimColor    = { value: new THREE.Color(0xfff0c0) };
+        shader.uniforms.uRimStrength = { value: 0.40 };
+        // Declare the custom uniforms (Three only auto-declares the standard
+        // built-in set), then inject the rim term right after the lighting
+        // chunk has finished accumulating into reflectedLight.
+        shader.fragmentShader =
+          'uniform vec3 uRimColor;\nuniform float uRimStrength;\n' +
+          shader.fragmentShader.replace(
+            '#include <lights_fragment_end>',
+            `#include <lights_fragment_end>
+             // Toon rim — viewspace dot, raised to power for a tight edge.
+             vec3 _rimView = normalize(vViewPosition);
+             float _rim = 1.0 - max(0.0, dot(_rimView, normal));
+             _rim = pow(_rim, 2.2);
+             reflectedLight.indirectDiffuse += uRimColor * _rim * uRimStrength;
+            `,
+          );
+        mat.userData.shader = shader;
+      };
+      mat.customProgramCacheKey = () => 'toon_rim';
+      _cacheToon.set(key, mat);
+    }
+    return mat;
+  }
 
   if (usePBR) {
     let mat = _cachePBR.get(key);
