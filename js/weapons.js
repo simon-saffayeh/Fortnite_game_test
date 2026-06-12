@@ -100,6 +100,20 @@ export const WEAPON_DEFS = {
     spread: 0.010, magSize: 7, reloadTime: 1.9, ammoType: 'heavy',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
   },
+  crossbow: {
+    id: 'crossbow', name: 'Crossbow',
+    damage: 98, fireRate: 1.1, bulletSpeed: 210, range: 290,
+    spread: 0.004, magSize: 1, reloadTime: 1.4, ammoType: 'heavy',
+    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: false, pellets: 1,
+    silent: true, gravity: 22,
+  },
+  silencedSMG: {
+    id: 'silencedSMG', name: 'Silenced SMG',
+    damage: 15, fireRate: 0.08, bulletSpeed: 330, range: 115,
+    spread: 0.040, magSize: 25, reloadTime: 1.7, ammoType: 'light',
+    rarityColor: 0x00cc44, rarity: 'Uncommon', auto: true, pellets: 1,
+    silent: true,
+  },
   huntingRifle: {
     id: 'huntingRifle', name: 'Hunting Rifle',
     damage: 108, fireRate: 1.05, bulletSpeed: 490, range: 430,
@@ -619,6 +633,8 @@ export const RARITY_POOL = [
   { id: 'pistol',         weight: 25 },
   // Uncommon
   { id: 'smg',            weight: 18 },
+  { id: 'crossbow',       weight: 10 },
+  { id: 'silencedSMG',   weight:  8 },
   // Rare
   { id: 'ar',             weight: 12 },
   { id: 'heavyAR',        weight:  9 },
