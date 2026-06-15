@@ -35,6 +35,7 @@
       </div>
       <div class="bp-home-row">
         <button id="btn-battlepass" class="bp-home-btn">🎖 BATTLE PASS</button>
+        <button id="btn-locker" class="bp-home-btn bp-home-btn-alt">🎽 LOCKER</button>
         <div id="bp-home-chip" class="bp-home-chip"></div>
       </div>
       <div id="difficulty-row" class="difficulty-row">
@@ -51,13 +52,15 @@
         <span class="build-option-label">Enable Building</span>
       </label>
       <!-- Testing Mode toggle — hidden for production. Uncomment to re-enable
-           the dev loadout (full weapon set + ammo, 2× sprint). When absent,
-           main.js `_testingEnabled()` defaults to false, so the game runs in
-           normal production mode. -->
+           the dev loadout (full weapon set + ammo, 2× sprint) AND unlock every
+           Battle Pass cosmetic in the Locker. All the logic stays wired up:
+           main.js `_testingEnabled()` defaults to false when the checkbox is
+           absent, and the BattlePass.setDebugUnlockAll() hook no-ops, so the
+           game runs in normal production mode. -->
       <!--
       <label class="build-option testing-option">
         <input type="checkbox" id="testing-toggle" />
-        <span class="build-option-label testing-label">Testing Mode</span>
+        <span class="build-option-label testing-label">Testing Mode (unlock all locker items)</span>
       </label>
       -->
       <div class="options-panel">
@@ -94,6 +97,16 @@
         <span class="mode-label">Mode:</span>
         <button class="mode-btn active" data-mode="solo">Solo</button>
         <button class="mode-btn"        data-mode="duo">Duo</button>
+      </div>
+
+      <!-- Building toggle: host-only. The host's choice applies to the whole
+           party (sent with the match start). Non-hosts see it disabled. -->
+      <div id="lobby-build-row" class="lobby-build-row hidden">
+        <label class="lobby-build-label">
+          <input type="checkbox" id="lobby-build-toggle" />
+          <span>Enable Building</span>
+        </label>
+        <span id="lobby-build-note" class="lobby-build-note"></span>
       </div>
 
       <!-- Team picker: visible only when Duo is selected. Shows team buckets

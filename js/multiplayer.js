@@ -529,8 +529,13 @@ export class NetworkManager {
    * map (only meaningful for duo). The server forwards both verbatim in the
    * gameStart broadcast so every client agrees on team membership.
    */
-  startGame(matchMode = 'solo', teams = {}) {
-    this.send({ type: 'startGame', matchMode, teams });
+  startGame(matchMode = 'solo', teams = {}, buildEnabled = false) {
+    // Building is host-controlled for the whole party. The server forwards
+    // `matchMode` verbatim but drops unknown fields, so the build flag rides on
+    // the matchMode string ('solo'/'duo' → 'solo+build'/'duo+build') and is
+    // decoded by every client in the gameStart handler below.
+    const wireMode = buildEnabled ? `${matchMode}+build` : matchMode;
+    this.send({ type: 'startGame', matchMode: wireMode, teams });
   }
   /** Any in-game client may declare match end (victory / spectator-end). */
   sendMatchEnd() { this.send({ type: 'matchEnd' }); }
@@ -653,7 +658,10 @@ export class NetworkManager {
         // client at once, so this moment is the same for everyone (±latency).
         this.gameStartTime = performance.now();
         this.gameActive    = true;
-        this.matchMode     = msg.matchMode ?? 'solo';
+        // Decode the host's party-wide building flag that rode in on matchMode.
+        const rawMode      = msg.matchMode ?? 'solo';
+        this.buildEnabled  = rawMode.endsWith('+build');
+        this.matchMode     = rawMode.replace('+build', '');
         this.teams         = msg.teams     ?? {};
         this.myTeamId      = this.teams[this.myId] ?? null;
         this.inGameIds     = new Set(msg.inGameIds ?? []);

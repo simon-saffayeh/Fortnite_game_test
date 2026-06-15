@@ -61,8 +61,17 @@ class Menu {
     // Battle Pass — open the cosmetic progression overlay. The level chip on
     // the home screen reflects current tier + XP and re-renders on any change.
     document.getElementById('btn-battlepass').addEventListener('click', () => BattlePass.openOverlay());
+    document.getElementById('btn-locker').addEventListener('click', () => BattlePass.openLocker());
     BattlePass.refreshHomeChip();
     BattlePass.onChange(() => BattlePass.refreshHomeChip());
+
+    // Testing Mode also unlocks every cosmetic in the Locker (session-only).
+    const testingToggle = document.getElementById('testing-toggle');
+    if (testingToggle) {
+      const applyDebug = () => BattlePass.setDebugUnlockAll(testingToggle.checked);
+      testingToggle.addEventListener('change', applyDebug);
+      applyDebug();
+    }
 
     // Mode picker — tap-style buttons. Only the active button has the
     // `.active` class; clicking another toggles state and re-renders teams.
@@ -204,6 +213,9 @@ class Menu {
       if (msg.isHost) {
         document.getElementById('btn-start-game').classList.remove('hidden');
         this._setStatus('You are the host — wait for friends, then Start Game.');
+        // Seed the lobby building toggle from the home-screen preference.
+        const lb = document.getElementById('lobby-build-toggle');
+        if (lb) lb.checked = this._buildEnabled();
       } else {
         document.getElementById('lobby-mode-row').classList.add('readonly');
         this._setStatus('Waiting for host to start…');
@@ -226,7 +238,12 @@ class Menu {
       document.getElementById('btn-start-game').classList.remove('hidden');
       document.getElementById('lobby-mode-row').classList.remove('readonly');
       this._setStatus('You are now the host!');
+      // The new host inherits control of the building toggle. Seed it from
+      // their own home-screen preference, then enable it.
+      const lb = document.getElementById('lobby-build-toggle');
+      if (lb) lb.checked = this._buildEnabled();
       this._renderTeams();
+      this._refreshBuildToggle();
     };
 
     // Match start: only late joiners (not in inGameIds) stay in the lobby
@@ -235,7 +252,9 @@ class Menu {
     this._net.onGameStart = (msg) => {
       const inMatch = this._net.inGameIds.has(this._net.myId);
       if (inMatch) {
-        const buildEnabled   = this._buildEnabled();
+        // Building is decided by the host and carried in the gameStart msg —
+        // every client uses the same value (not their own home-screen toggle).
+        const buildEnabled   = !!this._net.buildEnabled;
         const testingEnabled = this._testingEnabled();
         document.getElementById('lobby-screen').classList.add('hidden');
         document.getElementById('loading-screen').classList.remove('hidden');
@@ -330,6 +349,26 @@ class Menu {
       specBtn.classList.add('hidden');
       this._renderTeams();
     }
+    this._refreshBuildToggle();
+  }
+
+  /**
+   * Lobby building toggle. Visible while the lobby is idle and interactive only
+   * for the host, whose choice applies to the whole party at match start.
+   * Non-hosts see it disabled. Hidden during a running match, mirroring the
+   * other host controls above.
+   */
+  _refreshBuildToggle() {
+    const row  = document.getElementById('lobby-build-row');
+    const cb   = document.getElementById('lobby-build-toggle');
+    const note = document.getElementById('lobby-build-note');
+    if (!row || !cb || !this._net) return;
+    const realActive = this._net.gameActive && this._net.inGameIds.size > 0;
+    row.classList.toggle('hidden', realActive);
+    const host = !!this._net.isHost;
+    cb.disabled = !host;
+    row.classList.toggle('readonly', !host);
+    if (note) note.textContent = host ? 'Applies to the whole party' : 'Set by the host';
   }
 
   /**
@@ -373,7 +412,8 @@ class Menu {
         return;
       }
     }
-    this._net.startGame(this._matchMode, this._teams);
+    const buildEnabled = document.getElementById('lobby-build-toggle')?.checked ?? false;
+    this._net.startGame(this._matchMode, this._teams, buildEnabled);
   }
 
   /**
@@ -1189,7 +1229,8 @@ class Game {
         const rp = this.net.remotePlayers.get(targetId);
         if (rp) {
           rp.takeDamage(damage);
-          const numPos = rp.getCenter().clone().add(new THREE.Vector3(0, 0.5, 0));
+          // Above the head (getCenter is body-centre), not at the impact point.
+          const numPos = rp.getCenter().clone().add(new THREE.Vector3(0, 1.4, 0));
           this.dmgNums.show(numPos, damage, this.camera, this.canvas, headshot || damage >= 80);
           if (headshot) this.dmgNums.showHeadshot(numPos, this.camera, this.canvas);
         }
@@ -1202,7 +1243,12 @@ class Game {
     };
 
     this.projectiles.onEnemyHit = (pos, damage, enemy, justKilled, headshot) => {
-      const numPos = pos.clone().add(new THREE.Vector3(0, 0.8, 0));
+      // Float the numbers / ELIMINATED tag above the enemy's head — consistent
+      // regardless of where the bullet actually landed. Fall back to the impact
+      // point (+0.8) only if the enemy reference is missing.
+      const numPos = enemy?.root?.position
+        ? enemy.root.position.clone().add(new THREE.Vector3(0, 2.6, 0))
+        : pos.clone().add(new THREE.Vector3(0, 1.2, 0));
       this.dmgNums.show(numPos, damage, this.camera, this.canvas, headshot);
       if (justKilled) {
         this.dmgNums.showKill(numPos, this.camera, this.canvas);

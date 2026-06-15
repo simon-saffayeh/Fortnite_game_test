@@ -645,7 +645,7 @@ export const RARITY_POOL = [
   { id: 'huntingRifle',   weight:  4 },
   { id: 'handCannon',     weight:  5 },
   // Legendary
-  { id: 'sniper',          weight:  2.25 },
+  { id: 'sniper',          weight:  2.75 },
   { id: 'rocketLauncher',  weight:  1.5 },
   { id: 'grenadeLauncher', weight:  1.5 },
   // Mythic — kept slightly rarer than legendaries

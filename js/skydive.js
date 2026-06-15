@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { paintedPBR, boxGeo } from './materials.js';
+import { BattlePass } from './battlepass.js';
+import { SkydiveTrail } from './skydiveTrails.js';
 
 // ── Deploy phase: ride the battle bus, jump out, skydive, parachute, land ─────
 // Fortnite-style match intro. While active, this controller fully owns the
@@ -34,6 +36,7 @@ const _qPitch = new THREE.Quaternion();
 const _qRoll  = new THREE.Quaternion();
 const _axX    = new THREE.Vector3(1, 0, 0);
 const _axZ    = new THREE.Vector3(0, 0, 1);
+const _trailPos = new THREE.Vector3();   // scratch — skydive trail emit point
 
 // Bus orbit camera
 const BUS_ORBIT_DIST = 22;  // how far back the camera sits from the bus
@@ -200,6 +203,10 @@ export class DeployController {
     this._buildParachute();
     this._streaks = new WindStreaks(scene);
 
+    // ── Equipped Battle Pass skydive trail (cosmetic, local-only) ──────────
+    const trailFx = BattlePass.skydiveTrailFx?.() ?? null;
+    this._trail   = trailFx ? new SkydiveTrail(scene, trailFx) : null;
+
     // ── Player presentation ───────────────────────────────────────────────
     // Player stays invisible during the bus phase (it's a cinematic orbit of
     // the bus, not a chase cam) — revealed on _jumpOut() when they leap out.
@@ -277,6 +284,16 @@ export class DeployController {
       );
     } else {
       this._streaks._mat.color.setRGB(1, 1, 1);
+    }
+
+    // Equipped cosmetic skydive trail
+    if (this._trail) {
+      if (this.phase === DEPLOY_PHASE.SKYDIVE || this.phase === DEPLOY_PHASE.CHUTE) {
+        const p = this.player.root.position;
+        _trailPos.set(p.x, p.y + 0.6, p.z);
+        this._trail.emit(dt, _trailPos);
+      }
+      this._trail.update(dt);
     }
 
     // Cloud flash — fade opacity back to resting value
@@ -451,6 +468,8 @@ export class DeployController {
     this.scene.remove(this._bus);
     this._disposeGroup(this._bus);
     this._streaks.remove();
+    this._trail?.remove();
+    this._trail = null;
     this._banner.remove();
 
     // Restore camera FOV so the FPS camera doesn't pop the projection matrix

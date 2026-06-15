@@ -15,7 +15,7 @@ const PROFILE_KEY = 'bi_profile_id';
 const SCHEMA_V    = 1;
 
 const XP_PER_TIER = 1000;
-const MAX_TIER    = 30;
+const MAX_TIER    = 36;
 const SEASON_ID   = 's1';
 const SEASON_NAME = 'Season 1 — Island Outlaws';
 
@@ -64,41 +64,58 @@ const COSMETICS = {
   badge_diamond: { slot: 'badge', name: 'Diamond', value: '💎', rarity: 'epic'      },
   badge_crown:   { slot: 'badge', name: 'Crown',   value: '👑', rarity: 'legendary' },
   badge_trophy:  { slot: 'badge', name: 'Trophy',  value: '🏆', rarity: 'legendary' },
+
+  // skydive trails — equipped effect streams behind you during freefall.
+  // `glyph` is shown in the UI; `fx` drives the particle emitter in skydive.js
+  // ('mode' lets the emitter special-case rainbow/confetti colour cycling).
+  trail_smoke:    { slot: 'trail', name: 'Smoke Trail',    value: '💨', rarity: 'uncommon',  glyph: '💨', fx: { color: 0xdedede,    mode: 'puff'     } },
+  trail_flame:    { slot: 'trail', name: 'Inferno Trail',  value: '🔥', rarity: 'rare',      glyph: '🔥', fx: { color: 0xff6622,    mode: 'flame'    } },
+  trail_sparkle:  { slot: 'trail', name: 'Stardust Trail', value: '✨', rarity: 'epic',      glyph: '✨', fx: { color: 0xffd95a,    mode: 'sparkle'  } },
+  trail_aurora:   { slot: 'trail', name: 'Aurora Trail',   value: '🌈', rarity: 'epic',      glyph: '🌈', fx: { color: 'rainbow',   mode: 'rainbow'  } },
+  trail_voltage:  { slot: 'trail', name: 'Voltage Trail',  value: '⚡', rarity: 'legendary', glyph: '⚡', fx: { color: 0x55ccff,    mode: 'volt'     } },
+  trail_confetti: { slot: 'trail', name: 'Confetti Trail', value: '🎉', rarity: 'legendary', glyph: '🎉', fx: { color: 'confetti',  mode: 'confetti' } },
 };
 
-// ── Season tier track ── tier number → reward cosmetic id. 30 tiers, one
-// reward each, paced so colors/badges/titles interleave with rarity climbing.
+// ── Season tier track ── tier number → reward cosmetic id. 36 tiers, one
+// reward each, paced so colours / badges / titles / skydive trails interleave
+// with rarity climbing toward the Tier-36 Legend title.
 const TIER_REWARDS = [
-  'title_rookie',   // 1
-  'badge_star',     // 2
-  'color_green',    // 3
-  'badge_target',   // 4
-  'color_cyan',     // 5
-  'title_scavenger',// 6
-  'color_blue',     // 7
-  'badge_fire',     // 8
-  'title_looter',   // 9
-  'color_lime',     // 10
-  'badge_bolt',     // 11
-  'title_sharpshooter', // 12
-  'color_purple',   // 13
-  'badge_skull',    // 14
-  'title_stormchaser',  // 15
-  'color_orange',   // 16
-  'badge_ghost',    // 17
-  'color_gold',     // 18
-  'title_survivor', // 19
-  'badge_diamond',  // 20
-  'color_pink',     // 21
-  'badge_crown',    // 22
-  'title_apex',     // 23
-  'color_ice',      // 24
-  'badge_trophy',   // 25
-  'color_crimson',  // 26
-  'title_warlord',  // 27
-  'color_magma',    // 28
-  'color_rainbow',  // 29
-  'title_legend',   // 30
+  'title_rookie',       // 1
+  'badge_star',         // 2
+  'color_green',        // 3
+  'trail_smoke',        // 4  ← skydive trail
+  'color_cyan',         // 5
+  'title_scavenger',    // 6
+  'badge_target',       // 7
+  'color_blue',         // 8
+  'trail_flame',        // 9  ← skydive trail
+  'badge_fire',         // 10
+  'color_lime',         // 11
+  'title_looter',       // 12
+  'badge_bolt',         // 13
+  'color_orange',       // 14
+  'title_sharpshooter', // 15
+  'trail_sparkle',      // 16 ← skydive trail
+  'color_ice',          // 17
+  'badge_skull',        // 18
+  'color_purple',       // 19
+  'title_stormchaser',  // 20
+  'badge_ghost',        // 21
+  'color_pink',         // 22
+  'trail_aurora',       // 23 ← skydive trail
+  'title_survivor',     // 24
+  'badge_diamond',      // 25
+  'color_crimson',      // 26
+  'title_apex',         // 27
+  'color_gold',         // 28
+  'trail_voltage',      // 29 ← skydive trail
+  'badge_crown',        // 30
+  'title_warlord',      // 31
+  'color_magma',        // 32
+  'badge_trophy',       // 33
+  'color_rainbow',      // 34
+  'trail_confetti',     // 35 ← skydive trail
+  'title_legend',       // 36
 ];
 
 // Reverse lookup: cosmetic id → tier it unlocks at.
@@ -134,6 +151,7 @@ class BattlePassManager {
   constructor(store = new LocalStore()) {
     this._store     = store;
     this._listeners = [];
+    this._debugAll  = false;   // Testing Mode: treat every cosmetic as owned
     this._profileId = this._loadProfileId();
     this._state     = this._normalize(this._store.load());
     // Persist back so a fresh profile / migrated schema lands on disk immediately.
@@ -166,6 +184,7 @@ class BattlePassManager {
         title: COSMETICS[eq.title]?.slot === 'title' ? eq.title : null,
         color: COSMETICS[eq.color]?.slot === 'color' ? eq.color : 'white',
         badge: COSMETICS[eq.badge]?.slot === 'badge' ? eq.badge : null,
+        trail: COSMETICS[eq.trail]?.slot === 'trail' ? eq.trail : null,
       },
     };
   }
@@ -194,9 +213,23 @@ class BattlePassManager {
   rewardIdAt(tier)     { return TIER_REWARDS[tier - 1] || null; }
 
   ownsCosmetic(id) {
+    if (this._debugAll) return true;             // Testing Mode unlocks everything
     if (id === 'white') return true;             // default color always owned
     const tier = TIER_OF[id];
     return tier != null && this.isClaimed(tier);
+  }
+
+  /**
+   * Testing Mode toggle. When on, every cosmetic counts as owned so the Locker
+   * shows the full catalogue. This is a session-only override — it is NOT
+   * persisted, so unchecking restores the player's real unlock progress.
+   */
+  setDebugUnlockAll(on) {
+    on = !!on;
+    if (on === this._debugAll) return;
+    this._debugAll = on;
+    if (this._locker && !this._locker.classList.contains('hidden')) this._renderLocker();
+    for (const fn of this._listeners) { try { fn(this); } catch { /* listener error */ } }
   }
 
   // ── XP earning ────────────────────────────────────────────────────────────
@@ -251,6 +284,15 @@ class BattlePassManager {
   nameColorAnim() { return COSMETICS[this.nameColorId()]?.anim ?? null; }
   titleText() { const id = this._state.equipped.title; return id ? COSMETICS[id]?.value : null; }
   badgeGlyph() { const id = this._state.equipped.badge; return id ? COSMETICS[id]?.value : null; }
+
+  // Skydive trail — read by skydive.js to drive the freefall particle emitter.
+  skydiveTrailId() { return this._state.equipped.trail || null; }
+  skydiveTrailFx() { const id = this._state.equipped.trail; return id ? (COSMETICS[id]?.fx ?? null) : null; }
+
+  /** Ids of every owned (claimed) cosmetic in a slot. 'white' always counts. */
+  ownedBySlot(slot) {
+    return Object.keys(COSMETICS).filter(id => COSMETICS[id].slot === slot && this.ownsCosmetic(id));
+  }
 
   /**
    * Build decorated HTML for the local player's name (badge + title + colored
@@ -390,6 +432,8 @@ class BattlePassManager {
         icon = sw;
       } else if (cos?.slot === 'badge') {
         icon = `<span class="bp-reward-glyph">${cos.value}</span>`;
+      } else if (cos?.slot === 'trail') {
+        icon = `<span class="bp-reward-glyph">${cos.glyph}</span>`;
       } else {
         icon = `<span class="bp-reward-glyph bp-reward-title">T</span>`;
       }
@@ -410,6 +454,104 @@ class BattlePassManager {
         </div>`;
     }
     track.innerHTML = html;
+  }
+
+  // ── Locker — equip-management hub, grouped by cosmetic slot ─────────────────
+  openLocker() {
+    this._ensureLocker();
+    this._renderLocker();
+    this._locker.classList.remove('hidden');
+    document.exitPointerLock?.();
+  }
+
+  closeLocker() { this._locker?.classList.add('hidden'); }
+
+  _ensureLocker() {
+    if (this._locker) return;
+    const el = document.createElement('div');
+    el.id = 'locker-overlay';
+    el.className = 'hidden';
+    el.innerHTML = `
+      <div class="lk-panel">
+        <div class="bp-header">
+          <div class="bp-header-titles">
+            <div class="bp-season">🎽 LOCKER</div>
+            <div class="bp-sub">Equip the rewards you've unlocked. Earn more by levelling the Battle Pass.</div>
+          </div>
+          <button class="bp-close" id="lk-close-btn">✕</button>
+        </div>
+        <div class="lk-body" id="lk-body"></div>
+      </div>`;
+    document.body.appendChild(el);
+    this._locker = el;
+
+    el.querySelector('#lk-close-btn').addEventListener('click', () => this.closeLocker());
+    el.addEventListener('click', (e) => { if (e.target === el) this.closeLocker(); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this._locker && !this._locker.classList.contains('hidden')) {
+        this.closeLocker();
+      }
+    });
+    el.querySelector('#lk-body').addEventListener('click', (e) => {
+      const card = e.target.closest('.lk-card[data-slot]');
+      if (!card) return;
+      const id = card.dataset.id === '__none__' ? null : card.dataset.id;
+      this.equip(card.dataset.slot, id);
+      this._renderLocker();
+    });
+  }
+
+  _lockerCardHTML(slot, id, label, equipped) {
+    let preview;
+    if (id === null) {
+      preview = `<span class="lk-none">✕</span>`;
+    } else {
+      const cos = COSMETICS[id];
+      if (slot === 'color') {
+        preview = cos.value === 'animated'
+          ? `<span class="bp-swatch bp-anim-${cos.anim}"></span>`
+          : `<span class="bp-swatch" style="background:${cos.value}"></span>`;
+      } else if (slot === 'title') {
+        preview = `<span class="lk-title-preview">${escapeHtml(cos.value)}</span>`;
+      } else {
+        preview = `<span class="lk-glyph">${cos.glyph ?? cos.value}</span>`;
+      }
+    }
+    const rarCol = RARITY_COLORS[id ? COSMETICS[id].rarity : 'common'] || '#b8c0cc';
+    return `
+      <button class="lk-card ${equipped ? 'equipped' : ''}" data-slot="${slot}" data-id="${id ?? '__none__'}" style="--rar:${rarCol}">
+        <span class="lk-preview">${preview}</span>
+        <span class="lk-label">${escapeHtml(label)}</span>
+        ${equipped ? '<span class="lk-tick">✓</span>' : ''}
+      </button>`;
+  }
+
+  _renderLocker() {
+    if (!this._locker) return;
+    const sections = [
+      { slot: 'color', label: 'Name Colour',   hasNone: false, noneLabel: 'Default' },
+      { slot: 'title', label: 'Title',         hasNone: true,  noneLabel: 'None' },
+      { slot: 'badge', label: 'Badge',         hasNone: true,  noneLabel: 'None' },
+      { slot: 'trail', label: 'Skydive Trail', hasNone: true,  noneLabel: 'None' },
+    ];
+    let html = '';
+    for (const sec of sections) {
+      const equippedId = this._state.equipped[sec.slot];
+      let cards = '';
+      // color's always-owned 'white' acts as its default, so it needs no
+      // separate "None" card; the other slots get one to clear the slot.
+      if (sec.hasNone) cards += this._lockerCardHTML(sec.slot, null, sec.noneLabel, equippedId == null);
+      const owned = this.ownedBySlot(sec.slot);
+      for (const id of owned) cards += this._lockerCardHTML(sec.slot, id, COSMETICS[id].name, equippedId === id);
+      const empty = sec.slot !== 'color' && owned.length === 0;
+      html += `
+        <div class="lk-section">
+          <div class="lk-section-title">${escapeHtml(sec.label)}</div>
+          <div class="lk-grid">${cards}</div>
+          ${empty ? '<div class="lk-empty">Unlock rewards in the Battle Pass to fill this slot.</div>' : ''}
+        </div>`;
+    }
+    this._locker.querySelector('#lk-body').innerHTML = html;
   }
 }
 
