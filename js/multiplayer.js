@@ -525,6 +525,13 @@ export class NetworkManager {
   setName(name)          { this.myName = name; this.send({ type: 'setName', name }); }
   setReady(ready)        { this.send({ type: 'ready', value: ready }); }
   /**
+   * Broadcast our equipped lobby cosmetics ({ color, title, badge } ids) so the
+   * other players can show them in the LOBBY list. Rides the relayed 'chat'
+   * channel — the server forwards it verbatim with our id attached (server.js
+   * is not modifiable, and only its pure-relay types carry arbitrary fields).
+   */
+  sendCosmetics(cosmetics) { this.send({ type: 'chat', sub: 'cosmetics', cosmetics }); }
+  /**
    * Host only. `matchMode` is 'solo' or 'duo'. `teams` is a {playerId: teamId}
    * map (only meaningful for duo). The server forwards both verbatim in the
    * gameStart broadcast so every client agrees on team membership.
@@ -646,6 +653,15 @@ export class NetworkManager {
       case 'playerReady':
         if (this.players.has(msg.id)) this.players.get(msg.id).ready = msg.ready;
         if (this.onPlayerReady) this.onPlayerReady(msg);
+        break;
+
+      case 'chat':
+        // Cosmetics announcement (lobby only): remember a player's equipped
+        // colour/title/badge so the lobby list can render their decorations.
+        if (msg.sub === 'cosmetics' && this.players.has(msg.id)) {
+          this.players.get(msg.id).cosmetics = msg.cosmetics || null;
+          if (this.onPlayerCosmetics) this.onPlayerCosmetics(msg.id);
+        }
         break;
 
       case 'hostTransfer':

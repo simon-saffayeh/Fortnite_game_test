@@ -651,7 +651,7 @@ export const RARITY_POOL = [
   // Mythic — kept slightly rarer than legendaries
   { id: 'minigun',        weight:  0.6},
   { id: 'phaseRifle',     weight:  0.35},
-  { id: 'bombLauncher',   weight:  1.5},
+  { id: 'bombLauncher',   weight:  1.1},
 ];
 
 /**

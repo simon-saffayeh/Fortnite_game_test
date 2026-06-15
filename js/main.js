@@ -209,6 +209,8 @@ class Menu {
         id: msg.id, name: this._myName, ready: false, inGame: false,
       });
       this._net.setName(this._myName);
+      // Announce our lobby cosmetics so players already here can show them.
+      this._net.sendCosmetics(BattlePass.equipped);
       document.getElementById('lobby-mode-row').classList.remove('hidden');
       if (msg.isHost) {
         document.getElementById('btn-start-game').classList.remove('hidden');
@@ -225,7 +227,12 @@ class Menu {
       this._refreshMatchStateUI();
     };
 
-    this._net.onPlayerJoined = () => { this._refreshList(); this._renderTeams(); };
+    this._net.onPlayerJoined = () => {
+      // Re-announce our cosmetics so the newcomer can render them too.
+      this._net.sendCosmetics(BattlePass.equipped);
+      this._refreshList();
+      this._renderTeams();
+    };
     this._net.onPlayerLeft   = (msg) => {
       // Free their team slot so the picker stays accurate.
       delete this._teams[msg.id];
@@ -233,6 +240,7 @@ class Menu {
       this._renderTeams();
     };
     this._net.onPlayerReady  = () => this._refreshList();
+    this._net.onPlayerCosmetics = () => this._refreshList();
 
     this._net.onHostTransfer = () => {
       document.getElementById('btn-start-game').classList.remove('hidden');
@@ -298,7 +306,9 @@ class Menu {
       // plain — their cosmetics live in their own browser and aren't synced.
       const nameHTML = isMe
         ? `${BattlePass.decorateNameHTML(this._myName)} <span class="lp-level">LV ${BattlePass.level}</span> <span class="lp-you">(you)</span>`
-        : `<span class="lp-name">${p.name}</span>`;
+        : (p.cosmetics
+            ? BattlePass.decorateNameHTMLFor(p.name, p.cosmetics)
+            : `<span class="lp-name">${p.name}</span>`);
       li.innerHTML = `
         ${nameHTML}
         ${statusHTML}
@@ -315,6 +325,13 @@ class Menu {
       this._setStatus(`Match in progress (${inMatch} playing). You'll join the next round.`);
     } else {
       this._setStatus(`${total} / 20 players — ${rdy} ready`);
+    }
+
+    // Host's Start button stays disabled until every other player is ready.
+    const startBtn = document.getElementById('btn-start-game');
+    if (startBtn && this._net.isHost) {
+      const others = [...this._net.players.values()].filter(p => p.id !== this._net.myId && !p.inGame);
+      startBtn.disabled = others.length > 0 && !others.every(p => p.ready);
     }
   }
 
@@ -399,6 +416,13 @@ class Menu {
   }
 
   _requestStart() {
+    // Every other player must be readied up before the host can start. (The
+    // host starting is their own readiness; a host alone can still start.)
+    const others = [...this._net.players.values()].filter(p => p.id !== this._net.myId && !p.inGame);
+    if (others.length > 0 && !others.every(p => p.ready)) {
+      this._setStatus('All players must be ready before you can start.');
+      return;
+    }
     if (this._matchMode === 'duo') {
       // Refuse a start until every player has a team (and at least 2 teams).
       this._autoFillTeams();
@@ -1557,6 +1581,12 @@ class Game {
       onMatchOver: () => this._showSpectatorMatchOver(),
     });
     this.spectator.start();
+
+    // Hide the local player's own HUD (inventory bar, ammo, health/shield,
+    // crosshair) while spectating — otherwise the dead spectator's own loadout
+    // shows instead of the spectated player's. The spectator overlay
+    // (#spectator-hud) provides the target's name + held weapon/ammo.
+    document.body.classList.add('spectating');
 
     // Re-acquire pointer lock so mouse stays captured for any future input.
     if (!document.pointerLockElement) this.canvas.requestPointerLock();

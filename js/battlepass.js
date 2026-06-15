@@ -299,13 +299,24 @@ class BattlePassManager {
    * name). The name is escaped; used by the lobby own-entry render in main.js.
    */
   decorateNameHTML(name) {
-    const anim   = this.nameColorAnim();
-    const colVal = this.nameColorValue();
-    const style  = anim ? '' : `color:${colVal}`;
+    return this.decorateNameHTMLFor(name, this._state.equipped);
+  }
+
+  /**
+   * Decorate a name from an explicit equipped set ({ color, title, badge } of
+   * cosmetic ids). Used to render OTHER players in the multiplayer lobby from
+   * their broadcast cosmetics; `decorateNameHTML` is the local-player shortcut.
+   */
+  decorateNameHTMLFor(name, equipped) {
+    const colId  = (equipped && equipped.color) || 'white';
+    const colCos = COSMETICS[colId]?.slot === 'color' ? COSMETICS[colId] : COSMETICS.white;
+    const anim   = colCos?.anim ?? null;
+    const style  = anim ? '' : `color:${colCos?.value ?? '#ffffff'}`;
     const cls    = anim ? `bp-name bp-anim-${anim}` : 'bp-name';
     const nameEl = `<span class="${cls}" style="${style}">${escapeHtml(name)}</span>`;
-    const badge  = this.badgeGlyph();
-    const title  = this.titleText();
+    const bId = equipped && equipped.badge, tId = equipped && equipped.title;
+    const badge = (bId && COSMETICS[bId]?.slot === 'badge') ? COSMETICS[bId].value : null;
+    const title = (tId && COSMETICS[tId]?.slot === 'title') ? COSMETICS[tId].value : null;
     const badgeEl = badge ? `<span class="bp-deco-badge">${badge}</span>` : '';
     const titleEl = title ? `<span class="bp-deco-title">${escapeHtml(title)}</span>` : '';
     return `${badgeEl}${titleEl}${nameEl}`;

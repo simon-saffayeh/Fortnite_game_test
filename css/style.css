@@ -1357,3 +1357,16 @@ body {
 .lobby-build-row.readonly { opacity: 0.6; }
 .lobby-build-row.readonly .lobby-build-label { cursor: default; }
 .lobby-build-row.readonly .lobby-build-label input { cursor: not-allowed; }
+
+/* While spectating, hide the local (dead) player's own HUD so the spectated
+   player's info (shown in #spectator-hud) isn't confused with our own loot. */
+body.spectating #inv-bar,
+body.spectating #ammo-display,
+body.spectating #health-container,
+body.spectating #shield-container,
+body.spectating #armour-container,
+body.spectating #crosshair,
+body.spectating #controls-hint { display: none !important; }
+
+/* Host's Start button while not everyone is ready. */
+#btn-start-game:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }
