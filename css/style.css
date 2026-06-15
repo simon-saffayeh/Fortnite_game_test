@@ -1104,3 +1104,174 @@ body {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.55; }
 }
+
+/* ── Battle Pass ──────────────────────────────────────────────────────────── */
+/* Home-screen entry: button + level/XP chip */
+.bp-home-row {
+  display: flex; align-items: center; justify-content: center;
+  gap: 16px; margin-bottom: 22px; flex-wrap: wrap;
+}
+.bp-home-btn {
+  border: none; border-radius: 10px;
+  padding: 12px 30px; font-size: 14px; font-weight: 900; letter-spacing: 2.5px;
+  cursor: pointer; color: #2a1c00;
+  background: linear-gradient(135deg, #ffce4a, #f59e0b);
+  box-shadow: 0 4px 18px rgba(245,158,11,0.4);
+  transition: all 0.15s;
+}
+.bp-home-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(245,158,11,0.6); }
+.bp-home-chip {
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 99px; padding: 6px 14px;
+}
+.bp-chip-lv { font-size: 12px; font-weight: 900; letter-spacing: 1.5px; color: #ffce4a; }
+.bp-chip-bar {
+  width: 120px; height: 7px; border-radius: 99px; overflow: hidden;
+  background: rgba(255,255,255,0.14);
+}
+.bp-chip-fill {
+  display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, #f59e0b, #ffce4a);
+  transition: width 0.3s ease;
+}
+.bp-chip-xp { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: rgba(255,255,255,0.5); }
+
+/* Name decorations (lobby own-entry) */
+.bp-deco-badge { margin-right: 5px; }
+.bp-deco-title {
+  font-size: 10px; font-weight: 800; letter-spacing: 1px;
+  color: #ffce4a; text-transform: uppercase;
+  border: 1px solid rgba(255,206,74,0.5); border-radius: 4px;
+  padding: 1px 5px; margin-right: 6px; vertical-align: middle;
+}
+.bp-name { font-weight: 800; }
+.lp-level {
+  font-size: 10px; font-weight: 800; letter-spacing: 1px; color: #ffce4a;
+  margin-left: 6px;
+}
+.lp-you { font-size: 11px; color: rgba(255,255,255,0.4); margin-left: 4px; }
+
+/* Animated name colours */
+.bp-anim-rainbow {
+  background: linear-gradient(90deg,#ff4a5e,#ffce4a,#46e07a,#4aa8ff,#b96bff,#ff4a5e);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: bpRainbow 4s linear infinite;
+}
+.bp-anim-magma {
+  background: linear-gradient(90deg,#ff9a3c,#ff4a5e,#ffce4a,#ff9a3c);
+  background-size: 300% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: bpRainbow 3s linear infinite;
+}
+@keyframes bpRainbow { from { background-position: 0% 50%; } to { background-position: 300% 50%; } }
+
+/* Overlay */
+#battlepass-overlay {
+  position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+#battlepass-overlay.hidden { display: none; }
+.bp-panel {
+  width: min(92vw, 1000px); max-height: 86vh;
+  display: flex; flex-direction: column;
+  background: linear-gradient(160deg, #16181f, #0d0e13);
+  border: 1px solid rgba(255,206,74,0.35); border-radius: 14px;
+  box-shadow: 0 20px 70px rgba(0,0,0,0.6); padding: 22px 24px;
+}
+.bp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.bp-season { font-size: 22px; font-weight: 900; letter-spacing: 2px; color: #ffce4a; }
+.bp-sub { font-size: 12px; color: rgba(255,255,255,0.5); margin-top: 4px; max-width: 640px; }
+.bp-close {
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18);
+  color: #fff; border-radius: 8px; width: 36px; height: 36px;
+  font-size: 16px; cursor: pointer; flex-shrink: 0;
+}
+.bp-close:hover { background: rgba(255,255,255,0.16); }
+
+.bp-progress-row { display: flex; align-items: center; gap: 16px; margin: 18px 0 14px; }
+.bp-level-badge {
+  width: 54px; height: 54px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 900; color: #2a1c00;
+  background: linear-gradient(135deg, #ffce4a, #f59e0b);
+  border-radius: 50%; box-shadow: 0 4px 16px rgba(245,158,11,0.45);
+}
+.bp-progress-meta { flex: 1; }
+.bp-progress-bar {
+  width: 100%; height: 12px; border-radius: 99px; overflow: hidden;
+  background: rgba(255,255,255,0.12);
+}
+.bp-progress-fill {
+  display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, #f59e0b, #ffce4a);
+  transition: width 0.35s ease;
+}
+.bp-progress-text { font-size: 11px; letter-spacing: 1px; color: rgba(255,255,255,0.55); margin-top: 6px; }
+
+/* Tier track — horizontal scroll of reward cards */
+.bp-track {
+  display: flex; gap: 12px; overflow-x: auto; padding: 8px 2px 14px;
+  scrollbar-width: thin;
+}
+.bp-tier {
+  flex: 0 0 130px; display: flex; flex-direction: column; align-items: center;
+  gap: 8px; padding: 12px 10px; border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-top: 3px solid var(--rar, #b8c0cc);
+}
+.bp-tier.locked { opacity: 0.45; }
+.bp-tier.claimed { background: rgba(255,206,74,0.06); border-color: rgba(255,206,74,0.25); }
+.bp-tier-num {
+  font-size: 11px; font-weight: 900; letter-spacing: 1px; color: rgba(255,255,255,0.4);
+}
+.bp-tier-icon {
+  width: 52px; height: 52px; display: flex; align-items: center; justify-content: center;
+}
+.bp-reward-glyph { font-size: 34px; line-height: 1; }
+.bp-reward-title {
+  font-size: 24px; font-weight: 900; color: #ffce4a;
+  border: 2px solid #ffce4a; border-radius: 6px; width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+}
+.bp-swatch {
+  width: 40px; height: 40px; border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.3); display: inline-block;
+}
+.bp-swatch.bp-anim-rainbow, .bp-swatch.bp-anim-magma {
+  -webkit-background-clip: border-box; background-clip: border-box; color: transparent;
+}
+.bp-tier-name { font-size: 12px; font-weight: 700; color: #fff; text-align: center; }
+.bp-tier-rarity { font-size: 9px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
+.bp-tier-action { margin-top: 2px; min-height: 28px; display: flex; align-items: center; }
+.bp-btn {
+  border: none; border-radius: 6px; padding: 6px 14px;
+  font-size: 11px; font-weight: 800; letter-spacing: 1px; cursor: pointer;
+  background: rgba(255,255,255,0.12); color: #fff; transition: all 0.12s;
+}
+.bp-btn:hover { background: rgba(255,255,255,0.22); }
+.bp-btn-claim { background: linear-gradient(135deg, #ffce4a, #f59e0b); color: #2a1c00; }
+.bp-btn-claim:hover { transform: translateY(-1px); }
+.bp-btn-on { background: rgba(70,224,122,0.22); color: #46e07a; border: 1px solid rgba(70,224,122,0.5); }
+.bp-locked { font-size: 11px; letter-spacing: 1px; color: rgba(255,255,255,0.4); }
+
+/* In-game XP / level-up toast */
+#bp-toast-wrap {
+  position: fixed; right: 26px; bottom: 120px; z-index: 550;
+  display: flex; flex-direction: column-reverse; gap: 8px; pointer-events: none;
+}
+.bp-toast {
+  display: flex; flex-direction: column; align-items: flex-end;
+  background: rgba(0,0,0,0.7); border-right: 3px solid #ffce4a;
+  border-radius: 6px; padding: 8px 14px;
+  opacity: 0; transform: translateX(40px); transition: opacity 0.25s, transform 0.25s;
+}
+.bp-toast.show { opacity: 1; transform: translateX(0); }
+.bp-toast-big { font-size: 16px; font-weight: 900; letter-spacing: 1px; color: #ffce4a; }
+.bp-toast-small { font-size: 10px; letter-spacing: 1.5px; color: rgba(255,255,255,0.6); text-transform: uppercase; }
+.bp-toast-level { border-right-color: #46e07a; }
+.bp-toast-level .bp-toast-big { color: #46e07a; font-size: 20px; }

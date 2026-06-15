@@ -28,6 +28,7 @@ import { AmmoSystem, AMMO_VISUAL } from './ammo.js';
 import { Graphics, PRESETS } from './graphics.js';
 import { DecalSystem } from './decals.js';
 import { GrassSystem } from './grass.js';
+import { BattlePass } from './battlepass.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -56,6 +57,12 @@ class Menu {
     document.getElementById('btn-ready').addEventListener('click', () => this._toggleReady());
     document.getElementById('btn-start-game').addEventListener('click', () => this._requestStart());
     document.getElementById('btn-lobby-back').addEventListener('click', () => location.reload());
+
+    // Battle Pass — open the cosmetic progression overlay. The level chip on
+    // the home screen reflects current tier + XP and re-renders on any change.
+    document.getElementById('btn-battlepass').addEventListener('click', () => BattlePass.openOverlay());
+    BattlePass.refreshHomeChip();
+    BattlePass.onChange(() => BattlePass.refreshHomeChip());
 
     // Mode picker — tap-style buttons. Only the active button has the
     // `.active` class; clicking another toggles state and re-renders teams.
@@ -267,8 +274,14 @@ class Menu {
       const statusHTML = p.inGame
         ? `<span class="lp-ready">⚑ IN GAME</span>`
         : `<span class="lp-ready ${p.ready ? 'yes' : ''}">${p.ready ? '✓ READY' : '○ WAITING'}</span>`;
+      // The local player's row shows their equipped Battle Pass cosmetics
+      // (badge / title / name colour) + current tier. Other players render
+      // plain — their cosmetics live in their own browser and aren't synced.
+      const nameHTML = isMe
+        ? `${BattlePass.decorateNameHTML(this._myName)} <span class="lp-level">LV ${BattlePass.level}</span> <span class="lp-you">(you)</span>`
+        : `<span class="lp-name">${p.name}</span>`;
       li.innerHTML = `
-        <span class="lp-name">${isMe ? this._myName : p.name}${isMe ? ' (you)' : ''}</span>
+        ${nameHTML}
         ${statusHTML}
       `;
       ul.appendChild(li);
@@ -1018,6 +1031,9 @@ class Game {
       const drops = this._collectDeathDrops();
       this._spawnDeathDrops(drops, this.player.getPosition());
       if (this.net) this.net.sendDeath(drops);
+      // Battle Pass: award match-participation XP once, on the local player's
+      // death (the loss-side counterpart to the victory grant in _showVictory).
+      BattlePass.addMatchXP({ win: false });
       this._showDeathScreen(killerLabel);
     };
 
@@ -1028,6 +1044,7 @@ class Game {
       this.enemies.onKill = (killedEnemy) => {
         this._killCount++;
         this.hud.addKill('Enemy Soldier', { headshot: !!killedEnemy._killedByHeadshot });
+        BattlePass.addKillXP({ headshot: !!killedEnemy._killedByHeadshot });
         this.hud.setEnemiesRemaining(this._totalEnemies - this._killCount, this._totalEnemies);
         if (Math.random() < 0.65) this.pickups.spawnLoot(killedEnemy.root.position);
         if (this._killCount >= this._totalEnemies && !this._victoryShown) {
@@ -1046,6 +1063,7 @@ class Game {
                        : e._variant === 'bloater' ? 'Bloater'
                        : 'Zombie';
         this.hud.addKill(killName, { headshot: !!e._killedByHeadshot });
+        BattlePass.addKillXP({ headshot: !!e._killedByHeadshot });
         // Bloaters explode on death: acid burst + proximity damage
         if (e.bloaterAoE) {
           const bp = e.root.position.clone();
@@ -1099,6 +1117,7 @@ class Game {
             this.net.players.get(msg.id)?.name ?? 'Player',
             { headshot: !!this._lastHitWasHeadshot },
           );
+          BattlePass.addKillXP({ headshot: !!this._lastHitWasHeadshot });
           this.hitMark.hit(true);
           this._lastHitTarget = null;
           this._lastHitWasHeadshot = false;
@@ -1526,6 +1545,9 @@ class Game {
     // Inform the server the match is over so the lobby reopens for any
     // late joiners who connected during the round.
     this.net?.sendMatchEnd();
+    // Battle Pass: match-participation XP + victory bonus. Guarded upstream by
+    // _victoryShown, so this fires at most once per match.
+    BattlePass.addMatchXP({ win: true });
     const label = this.mode === 'multi' ? `Kills: ${this._playerKills}` : 'All enemies eliminated!';
     const el = document.createElement('div');
     el.id = 'victory-screen';

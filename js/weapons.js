@@ -645,13 +645,13 @@ export const RARITY_POOL = [
   { id: 'huntingRifle',   weight:  4 },
   { id: 'handCannon',     weight:  5 },
   // Legendary
-  { id: 'sniper',          weight:  3 },
-  { id: 'rocketLauncher',  weight:  2 },
-  { id: 'grenadeLauncher', weight:  2 },
-  // Mythic
-  { id: 'minigun',        weight:  0.8},
-  { id: 'phaseRifle',     weight:  0.5},
-  { id: 'bombLauncher',   weight:  2.0},
+  { id: 'sniper',          weight:  2.25 },
+  { id: 'rocketLauncher',  weight:  1.5 },
+  { id: 'grenadeLauncher', weight:  1.5 },
+  // Mythic — kept slightly rarer than legendaries
+  { id: 'minigun',        weight:  0.6},
+  { id: 'phaseRifle',     weight:  0.35},
+  { id: 'bombLauncher',   weight:  1.5},
 ];
 
 /**
