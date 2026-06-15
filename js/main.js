@@ -51,8 +51,8 @@ class Menu {
     document.addEventListener('click',   startMusic);
     document.addEventListener('keydown', startMusic);
 
-    document.getElementById('btn-solo').addEventListener('click', () => this._startSolo());
-    document.getElementById('btn-zombie').addEventListener('click', () => this._startZombie());
+    document.getElementById('btn-solo').addEventListener('click', () => this._openModePopup('solo'));
+    document.getElementById('btn-zombie').addEventListener('click', () => this._openModePopup('zombie'));
     document.getElementById('btn-multiplayer').addEventListener('click', () => this._openLobby());
     document.getElementById('btn-ready').addEventListener('click', () => this._toggleReady());
     document.getElementById('btn-start-game').addEventListener('click', () => this._requestStart());
@@ -62,8 +62,35 @@ class Menu {
     // the home screen reflects current tier + XP and re-renders on any change.
     document.getElementById('btn-battlepass').addEventListener('click', () => BattlePass.openOverlay());
     document.getElementById('btn-locker').addEventListener('click', () => BattlePass.openLocker());
+    document.getElementById('btn-shop').addEventListener('click', () => BattlePass.openShop());
     BattlePass.refreshHomeChip();
     BattlePass.onChange(() => BattlePass.refreshHomeChip());
+
+    // Mode setup popup — Solo/Zombie options (difficulty + building) appear
+    // here when the player picks a mode, instead of cluttering the home screen.
+    const modePopup = document.getElementById('mode-popup');
+    document.getElementById('mode-popup-start').addEventListener('click', () => {
+      modePopup.classList.add('hidden');
+      if (this._pendingMode === 'zombie') this._startZombie();
+      else this._startSolo();
+    });
+    document.getElementById('mode-popup-cancel').addEventListener('click', () => modePopup.classList.add('hidden'));
+    modePopup.addEventListener('click', (e) => { if (e.target === modePopup) modePopup.classList.add('hidden'); });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !modePopup.classList.contains('hidden')) modePopup.classList.add('hidden');
+    });
+
+    // Settings overlay — sensitivity / graphics / dev toggle live here now.
+    const settingsOverlay = document.getElementById('settings-overlay');
+    const btnSettings = document.getElementById('btn-settings');
+    if (settingsOverlay && btnSettings) {
+      btnSettings.addEventListener('click', () => settingsOverlay.classList.remove('hidden'));
+      document.getElementById('settings-close-btn').addEventListener('click', () => settingsOverlay.classList.add('hidden'));
+      settingsOverlay.addEventListener('click', (e) => { if (e.target === settingsOverlay) settingsOverlay.classList.add('hidden'); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !settingsOverlay.classList.contains('hidden')) settingsOverlay.classList.add('hidden');
+      });
+    }
 
     // Testing Mode also unlocks every cosmetic in the Locker (session-only).
     const testingToggle = document.getElementById('testing-toggle');
@@ -155,6 +182,18 @@ class Menu {
 
   _buildEnabled()   { return document.getElementById('build-toggle')?.checked   ?? false; }
   _testingEnabled() { return document.getElementById('testing-toggle')?.checked ?? false; }
+
+  /**
+   * Open the Solo/Zombie setup popup. Difficulty applies to Solo only; Zombie
+   * just needs the building toggle. The START button then calls the matching
+   * _startSolo()/_startZombie() (which read these controls).
+   */
+  _openModePopup(mode) {
+    this._pendingMode = mode;
+    document.getElementById('mode-popup-title').textContent = mode === 'zombie' ? 'ZOMBIE' : 'SOLO';
+    document.getElementById('mode-popup-difficulty').classList.toggle('hidden', mode !== 'solo');
+    document.getElementById('mode-popup').classList.remove('hidden');
+  }
 
   _startSolo() {
     const hs = document.getElementById('home-screen');

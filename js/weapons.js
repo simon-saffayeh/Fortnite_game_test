@@ -645,13 +645,16 @@ export const RARITY_POOL = [
   { id: 'huntingRifle',   weight:  4 },
   { id: 'handCannon',     weight:  5 },
   // Legendary
-  { id: 'sniper',          weight:  2.75 },
+  // sniper tuned to ≈1.5 spawns per 2 games (loot zones boost legendaries, so
+  // a low weight still surfaces a few across a match).
+  { id: 'sniper',          weight:  0.6 },
   { id: 'rocketLauncher',  weight:  1.5 },
   { id: 'grenadeLauncher', weight:  1.5 },
-  // Mythic — kept slightly rarer than legendaries
+  // Mythic
   { id: 'minigun',        weight:  0.6},
   { id: 'phaseRifle',     weight:  0.35},
-  { id: 'bombLauncher',   weight:  1.1},
+  // Nuke Launcher tuned to ≈1 spawn per 2 games.
+  { id: 'bombLauncher',   weight:  0.6},
 ];
 
 /**

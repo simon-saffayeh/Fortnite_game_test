@@ -36,10 +36,19 @@
       <div class="bp-home-row">
         <button id="btn-battlepass" class="bp-home-btn">🎖 BATTLE PASS</button>
         <button id="btn-locker" class="bp-home-btn bp-home-btn-alt">🎽 LOCKER</button>
+        <button id="btn-shop" class="bp-home-btn bp-home-btn-shop">💲 SHOP</button>
         <div id="bp-home-chip" class="bp-home-chip"></div>
       </div>
-      <div id="difficulty-row" class="difficulty-row">
-        <span class="difficulty-label">SOLO DIFFICULTY</span>
+      <button id="btn-settings" class="bp-home-btn bp-home-btn-settings">⚙ SETTINGS</button>
+    </div>
+  </div>
+
+  <!-- ── Mode setup popup — Solo/Zombie options (difficulty + building) ── -->
+  <div id="mode-popup" class="hidden">
+    <div class="mode-popup-panel">
+      <h2 class="mode-popup-title" id="mode-popup-title">SOLO</h2>
+      <div id="mode-popup-difficulty" class="difficulty-row">
+        <span class="difficulty-label">DIFFICULTY</span>
         <div class="difficulty-buttons">
           <button class="diff-btn"        data-diff="easy">EASY</button>
           <button class="diff-btn active"  data-diff="medium">MEDIUM</button>
@@ -51,18 +60,20 @@
         <input type="checkbox" id="build-toggle" />
         <span class="build-option-label">Enable Building</span>
       </label>
-      <!-- Testing Mode toggle — hidden for production. Uncomment to re-enable
-           the dev loadout (full weapon set + ammo, 2× sprint) AND unlock every
-           Battle Pass cosmetic in the Locker. All the logic stays wired up:
-           main.js `_testingEnabled()` defaults to false when the checkbox is
-           absent, and the BattlePass.setDebugUnlockAll() hook no-ops, so the
-           game runs in normal production mode. -->
-      <!--
-      <label class="build-option testing-option">
-        <input type="checkbox" id="testing-toggle" />
-        <span class="build-option-label testing-label">Testing Mode (unlock all locker items)</span>
-      </label>
-      -->
+      <div class="mode-popup-buttons">
+        <button id="mode-popup-start">START</button>
+        <button id="mode-popup-cancel">← BACK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Settings overlay (sensitivity, graphics, dev testing toggle) ── -->
+  <div id="settings-overlay" class="hidden">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <h2 class="settings-title">⚙ SETTINGS</h2>
+        <button class="bp-close" id="settings-close-btn">✕</button>
+      </div>
       <div class="options-panel">
         <div class="options-row">
           <label class="options-label" for="sens-slider">SENSITIVITY</label>
@@ -79,6 +90,18 @@
           </div>
         </div>
       </div>
+      <!-- Testing Mode toggle — hidden for production. Uncomment to re-enable
+           the dev loadout (full weapon set + ammo, 2× sprint) AND unlock every
+           Battle Pass cosmetic in the Locker. All the logic stays wired up:
+           main.js `_testingEnabled()` defaults to false when the checkbox is
+           absent, and the BattlePass.setDebugUnlockAll() hook no-ops, so the
+           game runs in normal production mode. -->
+      <!--
+      <label class="build-option testing-option">
+        <input type="checkbox" id="testing-toggle" />
+        <span class="build-option-label testing-label">Testing Mode (unlock all locker items)</span>
+      </label>
+      -->
     </div>
   </div>
 

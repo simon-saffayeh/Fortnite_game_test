@@ -1370,3 +1370,100 @@ body.spectating #controls-hint { display: none !important; }
 
 /* Host's Start button while not everyone is ready. */
 #btn-start-game:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.4); }
+
+/* ── C-Bucks: home buttons, chip balance, shop, tier skip ─────────────────── */
+.bp-home-btn-shop {
+  background: linear-gradient(135deg, #46e07a, #2a9d54);
+  color: #042713; box-shadow: 0 4px 18px rgba(70,224,122,0.4);
+}
+.bp-home-btn-shop:hover { box-shadow: 0 8px 26px rgba(70,224,122,0.6); }
+.bp-home-btn-settings {
+  background: linear-gradient(135deg, #5b6675, #3a424e);
+  color: #fff; box-shadow: 0 4px 18px rgba(91,102,117,0.4);
+}
+.bp-home-btn-settings:hover { box-shadow: 0 8px 26px rgba(91,102,117,0.6); }
+.bp-chip-cb { font-size: 12px; font-weight: 900; letter-spacing: 0.5px; color: #46e07a; }
+
+/* Tier-skip row inside the Battle Pass overlay */
+.bp-cbucks-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 14px; margin: 4px 0 14px;
+}
+.bp-cbucks-bal { font-size: 13px; font-weight: 700; letter-spacing: 0.5px; color: #46e07a; }
+.bp-cbucks-bal b { color: #6cf29a; }
+.bp-skip-btn { background: linear-gradient(135deg, #46e07a, #2a9d54); color: #042713; }
+.bp-skip-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.bp-skip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.bp-claimed-tag { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: #46e07a; }
+
+/* Shop overlay */
+#shop-overlay {
+  position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+#shop-overlay.hidden { display: none; }
+.shop-panel {
+  width: min(92vw, 760px); max-height: 86vh; overflow-y: auto;
+  display: flex; flex-direction: column;
+  background: linear-gradient(160deg, #16181f, #0d0e13);
+  border: 1px solid rgba(70,224,122,0.30); border-radius: 14px;
+  box-shadow: 0 20px 70px rgba(0,0,0,0.6); padding: 22px 24px;
+}
+.shop-balance { font-size: 14px; font-weight: 700; color: rgba(255,255,255,0.7); margin: 14px 0 8px; }
+.shop-balance b { color: #46e07a; }
+.shop-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.shop-buy { min-width: 72px; }
+
+/* Settings overlay */
+#settings-overlay {
+  position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+#settings-overlay.hidden { display: none; }
+.settings-panel {
+  width: min(92vw, 560px);
+  background: linear-gradient(160deg, #16181f, #0d0e13);
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 14px;
+  box-shadow: 0 20px 70px rgba(0,0,0,0.6); padding: 22px 24px;
+}
+.settings-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.settings-title { font-size: 20px; font-weight: 900; letter-spacing: 2px; color: #fff; margin: 0; }
+#settings-overlay .options-panel { margin-bottom: 0; }
+
+/* ── Mode setup popup (Solo / Zombie options) ─────────────────────────────── */
+#mode-popup {
+  position: fixed; inset: 0; z-index: 600;
+  background: rgba(0,0,0,0.82);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(5px);
+}
+#mode-popup.hidden { display: none; }
+.mode-popup-panel {
+  width: min(92vw, 480px);
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  background: linear-gradient(160deg, #16181f, #0d0e13);
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 14px;
+  box-shadow: 0 20px 70px rgba(0,0,0,0.6); padding: 26px 28px;
+}
+.mode-popup-title { font-size: 26px; font-weight: 900; letter-spacing: 3px; color: #fff; margin: 0; }
+#mode-popup-difficulty { margin: 0; }
+#mode-popup-difficulty.hidden { display: none; }
+#mode-popup .build-option { margin: 0; }
+.mode-popup-buttons { display: flex; gap: 14px; margin-top: 4px; }
+#mode-popup-start {
+  border: none; border-radius: 10px; padding: 14px 44px;
+  font-size: 16px; font-weight: 900; letter-spacing: 2px; cursor: pointer; color: #fff;
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  box-shadow: 0 4px 18px rgba(59,130,246,0.45); transition: transform 0.15s, box-shadow 0.15s;
+}
+#mode-popup-start:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(59,130,246,0.6); }
+#mode-popup-cancel {
+  border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 14px 24px;
+  font-size: 14px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
+  background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.8); transition: background 0.15s;
+}
+#mode-popup-cancel:hover { background: rgba(255,255,255,0.12); }
