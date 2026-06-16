@@ -434,8 +434,9 @@ export class ProjectileSystem {
           if (this.onEnemyHit) {
             this.onEnemyHit(b.position.clone(), finalDmg, enemy, !wasDead && enemy.dead, headshot);
           }
-          // Phase Rifle: teleport player to impact location
-          if (b.def?.teleport) {
+          // Phase Rifle: teleport player to impact location (local shooter only —
+          // remote players' replicated bullets must not move us).
+          if (b.def?.teleport && b.faction === 'player') {
             const tp = b.position.clone();
             tp.y = Math.max(tp.y, this.world.getTerrainHeight(tp.x, tp.z) + 0.5);
             player.root.position.copy(tp);
@@ -450,6 +451,10 @@ export class ProjectileSystem {
   }
 
   _doTeleport(b, pos, player, particles) {
+    // Only the LOCAL shooter teleports. Remote players' phase-rifle bullets are
+    // replicated on every client with faction 'remote'; without this guard they
+    // would teleport everyone to the impact point.
+    if (b.faction !== 'player') return;
     const tp = pos.clone();
     tp.y = Math.max(tp.y, this.world.getTerrainHeight(tp.x, tp.z) + 0.5);
     player.root.position.copy(tp);
