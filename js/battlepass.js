@@ -678,6 +678,12 @@ class BattlePassManager {
         </div>
         <div class="shop-balance">Balance: 💲 <b id="shop-balance-amt">0</b> C-Bucks</div>
         <div class="shop-grid" id="shop-grid"></div>
+        <div class="shop-redeem" style="display:flex;gap:8px;margin-top:16px;border-top:1px solid rgba(255,255,255,0.12);padding-top:14px;">
+          <input id="shop-redeem-input" type="text" placeholder="Enter redeem code" autocomplete="off" spellcheck="false"
+                 style="flex:1;min-width:0;padding:10px 12px;border-radius:8px;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.2);" />
+          <button class="bp-btn bp-btn-claim" id="shop-redeem-btn">REDEEM</button>
+        </div>
+        <div id="shop-redeem-msg" style="font-size:12px;margin-top:6px;min-height:14px;"></div>
       </div>`;
     document.body.appendChild(el);
     this._shop = el;
@@ -700,6 +706,38 @@ class BattlePassManager {
       }
       this._renderShop();
     });
+    el.querySelector('#shop-redeem-btn').addEventListener('click', () => this._submitRedeem());
+    el.querySelector('#shop-redeem-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this._submitRedeem();
+    });
+  }
+
+  _submitRedeem() {
+    const inp = this._shop && this._shop.querySelector('#shop-redeem-input');
+    const msg = this._shop && this._shop.querySelector('#shop-redeem-msg');
+    if (!inp) return;
+    const ok = this.redeemCode(inp.value);
+    if (msg) {
+      msg.textContent = ok ? '✓ +1000 C-Bucks redeemed!' : '✗ Invalid code.';
+      msg.style.color = ok ? '#46e07a' : '#ff6b6b';
+    }
+    inp.value = '';
+    this._renderShop();   // refresh the balance display
+  }
+
+  /**
+   * Redeem a promo code. The "cash" code grants 1000 C-Bucks and has UNLIMITED
+   * use — it is intentionally not tracked or consumed, so it can be redeemed
+   * repeatedly. Returns true on success.
+   */
+  redeemCode(code) {
+    const c = String(code || '').trim().toLowerCase();
+    if (c === 'cash') {
+      this.addCbucks(1000);
+      this._showToast('+1000 C-Bucks', 'Code redeemed', true);
+      return true;
+    }
+    return false;
   }
 
   _renderShop() {

@@ -48,7 +48,7 @@ export const WEAPON_DEFS = {
   },
   sniper: {
     id: 'sniper', name: 'Sniper Rifle',
-    damage: 125, fireRate: 1.6, bulletSpeed: 600, range: 950,
+    damage: 110, fireRate: 1.6, bulletSpeed: 600, range: 950,
     spread: 0.003, magSize: 1, reloadTime: 3.2, ammoType: 'heavy',
     rarityColor: 0xffaa00, rarity: 'Legendary', auto: false, pellets: 1,
     hasScope: 'sniper',
@@ -116,7 +116,7 @@ export const WEAPON_DEFS = {
   },
   huntingRifle: {
     id: 'huntingRifle', name: 'Hunting Rifle',
-    damage: 108, fireRate: 1.05, bulletSpeed: 490, range: 430,
+    damage: 95, fireRate: 1.05, bulletSpeed: 490, range: 430,
     spread: 0.007, magSize: 1, reloadTime: 1.9, ammoType: 'medium',
     rarityColor: 0xaa00ff, rarity: 'Epic', auto: false, pellets: 1,
     hasScope: 'hunting',
