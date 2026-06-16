@@ -452,6 +452,8 @@ export class NetworkManager {
     this.myId           = null;
     this.myName         = 'Player';
     this.isHost         = false;
+    this.partyCode      = null;      // room code (private party) or 'PUBLIC'
+    this.isPublic       = false;     // joined the public quick-play room?
     this.players        = new Map(); // id → { id, name, ready }
     this.remotePlayers  = new Map(); // id → RemotePlayer
     this._scene         = null;
@@ -467,6 +469,7 @@ export class NetworkManager {
 
     // Callbacks wired by Menu / Game
     this.onWelcome      = null;
+    this.onJoinError    = null;      // (reason) => void — server refused the join
     this.onPlayerJoined = null;
     this.onPlayerLeft   = null;
     this.onPlayerReady  = null;
@@ -505,7 +508,15 @@ export class NetworkManager {
     this.onBossDied  = null; // (msg) => void   host → all
   }
 
-  connect(url) {
+  /**
+   * @param {string} url   base ws(s)://host/ws
+   * @param {object} [opts] { create:true } → new private party;
+   *                        { party:'CODE' } → join that party;
+   *                        neither → public quick-play.
+   */
+  connect(url, opts = {}) {
+    if (opts.create)     url += (url.includes('?') ? '&' : '?') + 'create=1';
+    else if (opts.party) url += (url.includes('?') ? '&' : '?') + 'party=' + encodeURIComponent(opts.party);
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(url);
       this.ws.onopen    = () => resolve();
@@ -607,9 +618,16 @@ export class NetworkManager {
 
   _handle(msg) {
     switch (msg.type) {
+      case 'joinError':
+        // Server refused the join (bad code / full / server at capacity).
+        if (this.onJoinError) this.onJoinError(msg.reason || 'error');
+        break;
+
       case 'welcome':
         this.myId   = msg.id;
         this.isHost = msg.isHost;
+        this.partyCode = msg.partyCode ?? null;   // room/invite code
+        this.isPublic  = !!msg.isPublic;          // public quick-play vs private party
         this.gameActive = !!msg.gameActive;
         this.inGameIds = new Set(msg.inGameIds ?? []);
         for (const p of msg.players) this.players.set(p.id, { ...p, inGame: !!p.inGame });

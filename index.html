@@ -67,6 +67,20 @@
     </div>
   </div>
 
+  <!-- ── Party-choice popup — Quick Play / Create Party / Join Party ── -->
+  <div id="party-popup" class="hidden">
+    <div class="party-popup-panel">
+      <h2 class="party-popup-title">MULTIPLAYER</h2>
+      <button id="party-quickplay" class="party-btn">⚡ QUICK PLAY<span>Join a public match with anyone</span></button>
+      <button id="party-create" class="party-btn">➕ CREATE PARTY<span>Private match — invite your friends</span></button>
+      <div class="party-join-row">
+        <input id="party-code-input" type="text" maxlength="5" placeholder="CODE" autocomplete="off" spellcheck="false" />
+        <button id="party-join" class="party-btn-join">JOIN</button>
+      </div>
+      <button id="party-cancel" class="party-popup-cancel">← BACK</button>
+    </div>
+  </div>
+
   <!-- ── Settings overlay (sensitivity, graphics, dev testing toggle) ── -->
   <div id="settings-overlay" class="hidden">
     <div class="settings-panel">
@@ -112,6 +126,7 @@
       <div id="lobby-share">
         <span class="share-label">Share this URL with friends on the same network:</span>
         <span id="lobby-share-url"></span>
+        <button id="lobby-copy-btn" class="hidden">Copy</button>
       </div>
       <div id="lobby-players"></div>
 

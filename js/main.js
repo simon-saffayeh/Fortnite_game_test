@@ -29,6 +29,7 @@ import { Graphics, PRESETS } from './graphics.js';
 import { DecalSystem } from './decals.js';
 import { GrassSystem } from './grass.js';
 import { BattlePass } from './battlepass.js';
+import { preloadGameAssets } from './preload.js';
 
 const waveCount_hud = (w) => 3 + (w - 1) * 2; // mirrors zombie.js formula
 
@@ -51,9 +52,50 @@ class Menu {
     document.addEventListener('click',   startMusic);
     document.addEventListener('keydown', startMusic);
 
+    // Warm the browser cache with heavy match assets (sounds, nature models,
+    // terrain textures) while the player is in the menu, so the match-start
+    // loader hits cache instead of the network. Biggest help for multiplayer,
+    // where slow loaders otherwise deploy long after the round begins.
+    preloadGameAssets();
+
     document.getElementById('btn-solo').addEventListener('click', () => this._openModePopup('solo'));
     document.getElementById('btn-zombie').addEventListener('click', () => this._openModePopup('zombie'));
-    document.getElementById('btn-multiplayer').addEventListener('click', () => this._openLobby());
+    // MULTIPLAYER → party-choice popup (Quick Play / Create Party / Join Party).
+    const partyPopup = document.getElementById('party-popup');
+    const openParty = () => {
+      const inp = document.getElementById('party-code-input');
+      if (inp) inp.value = '';
+      partyPopup.classList.remove('hidden');
+    };
+    document.getElementById('btn-multiplayer').addEventListener('click', openParty);
+    document.getElementById('party-quickplay').addEventListener('click', () => { partyPopup.classList.add('hidden'); this._openLobby(); });
+    document.getElementById('party-create').addEventListener('click', () => { partyPopup.classList.add('hidden'); this._openLobby({ create: true }); });
+    const doJoinParty = () => {
+      const code = (document.getElementById('party-code-input').value || '').trim().toUpperCase();
+      if (!code) { document.getElementById('party-code-input').focus(); return; }
+      partyPopup.classList.add('hidden');
+      this._openLobby({ party: code });
+    };
+    document.getElementById('party-join').addEventListener('click', doJoinParty);
+    document.getElementById('party-code-input').addEventListener('keydown', e => { if (e.key === 'Enter') doJoinParty(); });
+    document.getElementById('party-cancel').addEventListener('click', () => partyPopup.classList.add('hidden'));
+    partyPopup.addEventListener('click', e => { if (e.target === partyPopup) partyPopup.classList.add('hidden'); });
+
+    // Copy the invite link from the lobby.
+    const copyBtn = document.getElementById('lobby-copy-btn');
+    if (copyBtn) copyBtn.addEventListener('click', () => {
+      const link = document.getElementById('lobby-share-url').textContent;
+      if (link && navigator.clipboard) {
+        navigator.clipboard.writeText(link).then(() => {
+          copyBtn.textContent = 'Copied!';
+          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+        }).catch(() => {});
+      }
+    });
+
+    // Arrived via an invite link (?party=CODE) → jump straight into that party.
+    const _partyParam = (new URLSearchParams(location.search).get('party') || '').trim().toUpperCase();
+    if (_partyParam) this._openLobby({ party: _partyParam });
     document.getElementById('btn-ready').addEventListener('click', () => this._toggleReady());
     document.getElementById('btn-start-game').addEventListener('click', () => this._requestStart());
     document.getElementById('btn-lobby-back').addEventListener('click', () => location.reload());
@@ -220,7 +262,7 @@ class Menu {
     setTimeout(() => new Game('zombie', null, buildEnabled, testingEnabled, this._music), 420);
   }
 
-  async _openLobby() {
+  async _openLobby(opts = {}) {
     const hs = document.getElementById('home-screen');
     hs.classList.add('fade-out');
     setTimeout(() => hs.style.display = 'none', 380);
@@ -229,8 +271,23 @@ class Menu {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${proto}://${window.location.host}/ws`;
 
+    // Wire join-error BEFORE connecting so a refusal (bad code / full party) is
+    // caught. On failure we navigate to the clean menu URL — stripping any
+    // ?party= so an invite-link auto-join can't loop on reload.
+    let joinFailed = false;
+    this._net.onJoinError = (reason) => {
+      joinFailed = true;
+      const m = {
+        not_found:   'Party not found — double-check the code.',
+        full:        'That party is full.',
+        server_full: 'Server is at capacity — try again shortly.',
+      };
+      alert(m[reason] || 'Could not join the party.');
+      location.href = location.origin + location.pathname;
+    };
+
     try {
-      await this._net.connect(wsUrl);
+      await this._net.connect(wsUrl, opts);
     } catch {
       alert('Could not reach the game server.\nMake sure server.js is running.');
       hs.style.display = '';
@@ -239,11 +296,10 @@ class Menu {
       return;
     }
 
-    // Show share URL
-    document.getElementById('lobby-share-url').textContent = window.location.href;
-
     // Wire lobby callbacks
     this._net.onWelcome = msg => {
+      if (joinFailed) return;          // server refused — don't enter the lobby
+      this._showInvite(msg);
       this._net.players.set(msg.id, {
         id: msg.id, name: this._myName, ready: false, inGame: false,
       });
@@ -324,6 +380,23 @@ class Menu {
     };
 
     document.getElementById('lobby-screen').classList.remove('hidden');
+  }
+
+  /** Show the invite link + code (private party) or a public-match note. */
+  _showInvite(msg) {
+    const labelEl = document.querySelector('#lobby-share .share-label');
+    const urlEl   = document.getElementById('lobby-share-url');
+    const copyBtn = document.getElementById('lobby-copy-btn');
+    if (msg.isPublic) {
+      if (labelEl) labelEl.textContent = 'Public match — anyone can Quick Play in.';
+      if (urlEl)   urlEl.textContent = '';
+      if (copyBtn) copyBtn.classList.add('hidden');
+    } else {
+      const link = `${location.origin}${location.pathname}?party=${msg.partyCode}`;
+      if (labelEl) labelEl.textContent = `Invite friends — party code: ${msg.partyCode}`;
+      if (urlEl)   urlEl.textContent = link;
+      if (copyBtn) copyBtn.classList.remove('hidden');
+    }
   }
 
   _refreshList() {

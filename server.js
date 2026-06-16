@@ -19,34 +19,76 @@ const MIME = {
   '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
 };
 
-// ── Lobby state ───────────────────────────────────────────────────────────────
-const players   = new Map(); // id → { socket, name, ready, buf }
-let gameActive  = false;
-const inGameIds = new Set(); // ids that were present when the match started
-let gameStartedAt = 0;       // Date.now() of the most recent startGame — late
-                             // joiners use the elapsed value to anchor their
-                             // storm clock to the same wall-clock the in-game
-                             // players already started from.
-let worldSeed     = 0;       // 32-bit seed shared with every client so the
-                             // weapon-type-at-spawn-point roll is identical
-                             // across players. Re-rolled per match.
-let hostId      = null;
-let nextId      = 1;
+// ── Rooms ───────────────────────────────────────────────────────────────────
+// Each party — plus the shared public quick-play lobby — is an isolated Room
+// with its own player list, leader (host), match state, and world seed. Players
+// carry a globally-unique id; `nextId` and the id→room index are the only
+// cross-room globals.
+//
+//   gameStartedAt: Date.now() of this room's most recent startGame — late
+//     joiners use the elapsed value to anchor their storm clock.
+//   worldSeed: 32-bit per-match seed so weapon-type-at-spawn-point is identical
+//     for everyone in the room. Re-rolled per match.
+const PUBLIC_CODE   = 'PUBLIC';
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I ambiguity
+const MAX_ROOMS     = 100;
+
+const rooms      = new Map(); // code → Room
+const playerRoom = new Map(); // playerId → room code (O(1) lookup on message)
+let   nextId     = 1;
+
+function makeRoom(code, isPublic) {
+  return {
+    code, isPublic,
+    players:       new Map(), // id → { socket, name, ready, buf, roomCode }
+    hostId:        null,      // leader
+    gameActive:    false,
+    inGameIds:     new Set(),
+    gameStartedAt: 0,
+    worldSeed:     0,
+  };
+}
+
+function genCode() {
+  let code;
+  do {
+    code = '';
+    for (let i = 0; i < 5; i++) code += CODE_ALPHABET[(Math.random() * CODE_ALPHABET.length) | 0];
+  } while (rooms.has(code));
+  return code;
+}
 
 // ── HTTP static file server ───────────────────────────────────────────────────
+const CACHEABLE_EXT = ['.wav','.mp3','.ogg','.png','.jpg','.gif','.glb','.gltf'];
 const server = http.createServer((req, res) => {
   let url = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   try { url = decodeURIComponent(url); } catch {}
-  const filePath   = path.join(ROOT, url);
-  const ext        = path.extname(filePath);
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end('404 Not Found: ' + url); return; }
-    const cacheable = ['.wav','.mp3','.ogg','.png','.jpg','.gif','.glb'].includes(ext);
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': cacheable ? 'public, max-age=86400' : 'no-cache',
+  const filePath = path.join(ROOT, url);
+  // Path-traversal guard: never serve anything outside the project root.
+  if (filePath !== ROOT && !filePath.startsWith(ROOT + path.sep)) {
+    res.writeHead(403); res.end('403 Forbidden'); return;
+  }
+  const ext = path.extname(filePath);
+  fs.stat(filePath, (statErr, stat) => {
+    if (statErr || !stat.isFile()) { res.writeHead(404); res.end('404 Not Found: ' + url); return; }
+    const cacheable = CACHEABLE_EXT.includes(ext);
+    const lastMod   = stat.mtime.toUTCString();
+    // Conditional GET: a client whose cached copy is still current revalidates
+    // with a cheap 304 instead of re-downloading the (often large) asset. With
+    // the preloader, this keeps repeat sessions fast too.
+    if (cacheable && req.headers['if-modified-since'] === lastMod) {
+      res.writeHead(304); res.end(); return;
+    }
+    fs.readFile(filePath, (err, data) => {
+      if (err) { res.writeHead(404); res.end('404 Not Found: ' + url); return; }
+      const headers = {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Cache-Control': cacheable ? 'public, max-age=86400' : 'no-cache',
+      };
+      if (cacheable) headers['Last-Modified'] = lastMod;
+      res.writeHead(200, headers);
+      res.end(data);
     });
-    res.end(data);
   });
 });
 
@@ -115,74 +157,96 @@ function sendTo(socket, obj) {
   if (!socket.destroyed) socket.write(buildFrame(obj));
 }
 
-function broadcast(obj, exceptId = null) {
+function broadcast(room, obj, exceptId = null) {
   const frame = buildFrame(obj);
-  for (const [id, p] of players) {
+  for (const [id, p] of room.players) {
     if (id !== exceptId && !p.socket.destroyed) p.socket.write(frame);
   }
 }
 
 server.on('upgrade', (req, socket) => {
-  if (req.url !== '/ws') { socket.destroy(); return; }
+  const u = new URL(req.url, 'http://localhost');   // parse path + query
+  if (u.pathname !== '/ws') { socket.destroy(); return; }
   const key = req.headers['sec-websocket-key'];
   if (!key) { socket.destroy(); return; }
-  if (players.size >= MAX_PLAYERS) {
-    socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
-    socket.destroy(); return;
-  }
 
-  // Defensive sanitize: if any cached state outlasted the player it
-  // referred to (lost-close events, host crashed mid-broadcast, etc.),
-  // clear it now so the incoming connection lands in a clean lobby.
-  if (players.size === 0) {
-    if (gameActive) console.log('[~] Resetting stale gameActive (no players connected)');
-    gameActive = false;
-    inGameIds.clear();
-    hostId = null;
-  } else if (gameActive) {
-    // Are any in-game IDs still actually connected? If not, the previous
-    // round ended without a clean matchEnd — reopen the lobby.
-    let anyAlive = false;
-    for (const id of inGameIds) if (players.has(id)) { anyAlive = true; break; }
-    if (!anyAlive) {
-      console.log('[~] Resetting stale gameActive (no in-game player connected)');
-      gameActive = false;
-      inGameIds.clear();
-    }
+  // ── Resolve which room this connection joins ───────────────────────────
+  // ?create=1 → fresh private party (joiner is leader)
+  // ?party=CODE → join an existing private party
+  // (nothing / ?public=1) → shared public quick-play room
+  const wantsCreate = u.searchParams.get('create') === '1';
+  const partyParam  = (u.searchParams.get('party') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  let room = null, joinErr = null;
+  if (wantsCreate) {
+    if (rooms.size >= MAX_ROOMS) joinErr = 'server_full';
+    else { room = makeRoom(genCode(), false); rooms.set(room.code, room); }
+  } else if (partyParam && partyParam !== PUBLIC_CODE) {
+    room = rooms.get(partyParam) || null;
+    if (!room) joinErr = 'not_found';
+  } else {
+    room = rooms.get(PUBLIC_CODE) || makeRoom(PUBLIC_CODE, true);
+    rooms.set(PUBLIC_CODE, room);
   }
+  if (room && !joinErr && room.players.size >= MAX_PLAYERS) joinErr = 'full';
 
+  // Upgrade first so we can deliver a clean joinError frame before closing.
   socket.write(
     'HTTP/1.1 101 Switching Protocols\r\n' +
     'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
     `Sec-WebSocket-Accept: ${wsAcceptKey(key)}\r\n\r\n`
   );
 
+  // Baseline error guard: a socket can emit 'error' (e.g. ECONNRESET) before or
+  // without ever becoming a player — notably a refused join below. Without a
+  // listener that throws as an unhandled exception and crashes the server.
+  socket.on('error', () => {});
+
+  if (joinErr) {
+    sendTo(socket, { type: 'joinError', reason: joinErr });
+    socket.end();
+    return;
+  }
+
+  // Defensive sanitize (per room): if cached state outlasted the players it
+  // referred to (lost-close events, host crashed mid-broadcast, etc.), clear
+  // it so the incoming connection lands in a clean lobby.
+  if (room.players.size === 0) {
+    room.gameActive = false; room.inGameIds.clear(); room.hostId = null;
+  } else if (room.gameActive) {
+    let anyAlive = false;
+    for (const id of room.inGameIds) if (room.players.has(id)) { anyAlive = true; break; }
+    if (!anyAlive) {
+      console.log(`[~] Resetting stale gameActive in room ${room.code}`);
+      room.gameActive = false; room.inGameIds.clear();
+    }
+  }
+
   const id     = String(nextId++);
-  const player = { id, socket, name: `Player${id}`, ready: false, buf: Buffer.alloc(0) };
+  const player = { id, socket, name: `Player${id}`, ready: false, buf: Buffer.alloc(0), roomCode: room.code };
+  if (!room.hostId) room.hostId = id;
 
-  if (!hostId) hostId = id;
-
-  // Welcome: existing player list (before adding ourselves). `inGame` lets
-  // the lobby colour each row appropriately — late joiners see the running
-  // players tagged "IN GAME" while they wait or spectate.
-  // `matchElapsedMs` lets late spectators anchor their storm clock to the
-  // moment the match actually started (rather than fresh-from-zero).
+  // Welcome: existing player list (before adding ourselves). `inGame` lets the
+  // lobby colour each row; `matchElapsedMs` lets late spectators anchor their
+  // storm clock. `partyCode`/`isPublic` tell the client how to show the lobby.
   sendTo(socket, {
     type: 'welcome', id,
-    isHost: id === hostId,
-    players: [...players.values()].map(p => ({
-      id: p.id, name: p.name, ready: p.ready, inGame: inGameIds.has(p.id),
+    isHost: id === room.hostId,
+    partyCode: room.code,
+    isPublic: room.isPublic,
+    players: [...room.players.values()].map(p => ({
+      id: p.id, name: p.name, ready: p.ready, inGame: room.inGameIds.has(p.id),
     })),
-    gameActive,
-    inGameIds: [...inGameIds],
-    matchElapsedMs: gameActive ? (Date.now() - gameStartedAt) : 0,
-    worldSeed: gameActive ? worldSeed : 0,
+    gameActive: room.gameActive,
+    inGameIds: [...room.inGameIds],
+    matchElapsedMs: room.gameActive ? (Date.now() - room.gameStartedAt) : 0,
+    worldSeed: room.gameActive ? room.worldSeed : 0,
   });
 
   // New connections are never in-game (they arrived after startGame).
-  broadcast({ type: 'playerJoined', id, name: player.name, inGame: false }, id);
-  players.set(id, player);
-  console.log(`[+] Player ${id} joined  (${players.size}/${MAX_PLAYERS})`);
+  broadcast(room, { type: 'playerJoined', id, name: player.name, inGame: false }, id);
+  room.players.set(id, player);
+  playerRoom.set(id, room.code);
+  console.log(`[+] Player ${id} joined room ${room.code} (${room.players.size}/${MAX_PLAYERS})`);
 
   socket.on('data', chunk => {
     player.buf = Buffer.concat([player.buf, chunk]);
@@ -212,57 +276,56 @@ function makeBusPath() {
 }
 
 function handleMessage(senderId, msg) {
-  const p = players.get(senderId);
+  const room = rooms.get(playerRoom.get(senderId));
+  const p    = room && room.players.get(senderId);
   if (!p) return;
 
   switch (msg.type) {
     case 'setName':
       p.name = String(msg.name || 'Player').slice(0, 16);
-      broadcast({ type: 'playerName', id: senderId, name: p.name });
+      broadcast(room, { type: 'playerName', id: senderId, name: p.name });
       break;
 
     case 'ready':
       p.ready = !!msg.value;
-      broadcast({ type: 'playerReady', id: senderId, ready: p.ready });
+      broadcast(room, { type: 'playerReady', id: senderId, ready: p.ready });
       break;
 
     case 'startGame':
-      if (senderId !== hostId) return;
-      if (gameActive) return; // already running — late joiners can't trigger another
-      // Host may start alone — useful for testing and trivially a 1-player
+      if (senderId !== room.hostId) return;   // leader only
+      if (room.gameActive) return; // already running — late joiners can't trigger another
+      // Leader may start alone — useful for testing and trivially a 1-player
       // "match" the server simply broadcasts and the client renders.
-      gameActive = true;
-      gameStartedAt = Date.now();
-      worldSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
-      inGameIds.clear();
-      for (const pid of players.keys()) inGameIds.add(pid);
+      room.gameActive = true;
+      room.gameStartedAt = Date.now();
+      room.worldSeed = (Math.random() * 0xFFFFFFFF) >>> 0;
+      room.inGameIds.clear();
+      for (const pid of room.players.keys()) room.inGameIds.add(pid);
       // matchMode is 'solo' or 'duo'. teams is a {playerId: teamId} map used
-      // only in duo. inGameIds tells late joiners (who arrive mid-broadcast)
-      // who's actually playing this round so their lobby can dim those rows.
-      // worldSeed makes weapon-type-at-spawn-point identical for every client.
-      broadcast({
+      // only in duo. inGameIds tells late joiners who's actually playing this
+      // round. worldSeed makes weapon-type-at-spawn-point identical per room.
+      broadcast(room, {
         type:      'gameStart',
         busPath:   makeBusPath(),
         matchMode: msg.matchMode ?? 'solo',
         teams:     msg.teams     ?? {},
-        inGameIds: [...inGameIds],
-        worldSeed,
+        inGameIds: [...room.inGameIds],
+        worldSeed: room.worldSeed,
       });
-      console.log(`[!] Game started (${msg.matchMode ?? 'solo'})`);
+      console.log(`[!] Game started in room ${room.code} (${msg.matchMode ?? 'solo'})`);
       break;
 
     case 'matchEnd':
       // Any in-game client can declare match end (victory / spectator
-      // match-over). Resets gameActive so the lobby reopens for everyone,
-      // including any late joiners who connected mid-match.
-      if (!gameActive) return;
-      gameActive = false;
-      inGameIds.clear();
-      broadcast({ type: 'matchEnded' });
-      console.log('[!] Match ended');
+      // match-over). Resets gameActive so the room's lobby reopens.
+      if (!room.gameActive) return;
+      room.gameActive = false;
+      room.inGameIds.clear();
+      broadcast(room, { type: 'matchEnded' });
+      console.log(`[!] Match ended in room ${room.code}`);
       break;
 
-    // Pure relay — forward with sender's id attached
+    // Pure relay — forward to the rest of the room with sender's id attached
     case 'state':
     case 'shoot':
     case 'hit':
@@ -270,30 +333,30 @@ function handleMessage(senderId, msg) {
     case 'chat':
     case 'supplyDropOpen':           // any client can open a drop
     case 'weaponDropped':            // any client can drop their weapon
-      broadcast({ ...msg, id: senderId }, senderId);
+      broadcast(room, { ...msg, id: senderId }, senderId);
       break;
 
-    // Host-authoritative: only the host may seed new supply drops. Non-host
+    // Leader-authoritative: only the leader may seed new supply drops. Others'
     // attempts are silently dropped so a misbehaving client can't grief.
     case 'supplyDropSpawn':
-      if (senderId !== hostId) return;
-      broadcast({ ...msg, id: senderId }, senderId);
+      if (senderId !== room.hostId) return;
+      broadcast(room, { ...msg, id: senderId }, senderId);
       break;
 
-    // Boss (Ms. Franks) sync. State / shoot / died are host-only broadcasts —
-    // we drop them from non-hosts so a misbehaving client can't fake boss state.
+    // Boss (Ms. Franks) sync. State / shoot / died are leader-only broadcasts —
+    // we drop them from others so a misbehaving client can't fake boss state.
     case 'bossState':
     case 'bossShoot':
     case 'bossDied':
-      if (senderId !== hostId) return;
-      broadcast({ ...msg, id: senderId }, senderId);
+      if (senderId !== room.hostId) return;
+      broadcast(room, { ...msg, id: senderId }, senderId);
       break;
 
-    // bossHit comes from any client — forward only to the host, who will
+    // bossHit comes from any client — forward only to the leader, who will
     // authoritatively apply damage and (eventually) broadcast new state.
     case 'bossHit': {
-      if (senderId === hostId) return;     // host damages directly, locally
-      const host = hostId != null ? players.get(hostId) : null;
+      if (senderId === room.hostId) return;   // leader damages directly, locally
+      const host = room.hostId != null ? room.players.get(room.hostId) : null;
       if (host && host.socket) {
         sendTo(host.socket, { ...msg, id: senderId });
       }
@@ -303,26 +366,35 @@ function handleMessage(senderId, msg) {
 }
 
 function disconnect(id) {
-  if (!players.has(id)) return;
-  players.delete(id);
-  inGameIds.delete(id);
-  broadcast({ type: 'playerLeft', id });
-  console.log(`[-] Player ${id} left    (${players.size}/${MAX_PLAYERS})`);
+  const room = rooms.get(playerRoom.get(id));
+  playerRoom.delete(id);
+  if (!room || !room.players.has(id)) return;
+  room.players.delete(id);
+  room.inGameIds.delete(id);
+  broadcast(room, { type: 'playerLeft', id });
+  console.log(`[-] Player ${id} left room ${room.code} (${room.players.size}/${MAX_PLAYERS})`);
 
   // If the last in-game player drops, the match is effectively over —
-  // reopen the lobby so any waiting late joiners can enter normally.
-  if (gameActive && inGameIds.size === 0) {
-    gameActive = false;
-    broadcast({ type: 'matchEnded' });
-    console.log('[!] Match ended (all in-game players left)');
+  // reopen the room's lobby so any waiting late joiners can enter normally.
+  if (room.gameActive && room.inGameIds.size === 0) {
+    room.gameActive = false;
+    broadcast(room, { type: 'matchEnded' });
+    console.log(`[!] Match ended in room ${room.code} (all in-game players left)`);
   }
 
-  if (id === hostId) {
-    hostId = players.size > 0 ? players.keys().next().value : null;
-    if (hostId) {
-      sendTo(players.get(hostId).socket, { type: 'hostTransfer' });
-      console.log(`[~] Host transferred to Player ${hostId}`);
+  // Leadership transfers to the next player IN THIS ROOM.
+  if (id === room.hostId) {
+    room.hostId = room.players.size > 0 ? room.players.keys().next().value : null;
+    if (room.hostId) {
+      sendTo(room.players.get(room.hostId).socket, { type: 'hostTransfer' });
+      console.log(`[~] Leadership of room ${room.code} → Player ${room.hostId}`);
     }
+  }
+
+  // Reclaim empty rooms (the public room is recreated on demand on next join).
+  if (room.players.size === 0) {
+    rooms.delete(room.code);
+    console.log(`[x] Room ${room.code} closed (empty)`);
   }
 }
 

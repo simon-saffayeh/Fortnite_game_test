@@ -24,6 +24,10 @@ const SOUND_FILES = {
   minigun:         'sounds/full_auto_sounds/smg_shot.wav',
 };
 
+// Unique sound-file URLs, exported so the asset preloader can warm them into
+// the browser cache before a match starts (see preload.js).
+export const SOUND_PATHS = [...new Set(Object.values(SOUND_FILES))];
+
 // Per-sound volume multipliers. 1.0 = no adjustment.
 // Tweak these to balance loudness across all weapons/effects.
 const VOLUME_WEIGHTS = {
